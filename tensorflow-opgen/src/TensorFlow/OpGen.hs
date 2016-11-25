@@ -289,14 +289,12 @@ typeSig pOp = constraints
 
     tensorArgAndComment t = tensorArg t <+> hang 0 ("-- ^" <+> argComment t)
     outputs = case parsedOutputs pOp of
-        [] -> wrapOutput "ControlNode"
+        [] -> wrapBuild "ControlNode"
         -- TODO(judahjacobson): To improve indentation: `tensorArgAndComment a`
-        [a] -> wrapOutput (tensorArg a) <+> "-- ^" <+> argComment a
-        as -> wrapOutput (tuple (map tensorArg as)) <+/> resultComment as
-    wrapOutput o
-        | parsedOpIsMonadic pOp = "Build" <+> parens o
-        | otherwise = o
-        
+        [a] -> wrapBuild (tensorArg a) <+> "-- ^" <+> argComment a
+        as -> wrapBuild (tuple (map tensorArg as)) <+/> resultComment as
+    wrapBuild o = "Build" <+> parens o
+
 -- | Render an op input or output.
 -- For example: "Tensor Ref Int64", "Tensor v t", "ResourceHandle dtype"
 tensorArg :: ParsedArg -> Doc
