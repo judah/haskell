@@ -13,14 +13,16 @@
 -- limitations under the License.
 
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TypeFamilies #-}
 
 module TensorFlow.BuildOp
     ( OpResult
-    , BuildOp
-    , buildOp
-    , buildListOp
+    , buildResult
     , eqLengthGuard
+    , BuildResult
+    , IsResult(..)
     )
   where
 
@@ -118,43 +120,9 @@ runResult ns o =
 
 -- | Make a new "stateful" op, which will not be deduped with otherwise
 -- identical ops.
-buildResult :: OpResult a => [Int64] -> OpDef -> [Output] -> Build a
-buildResult ns o ts
-    = runResult ns . Op . NodeName . (^. name) <$> addNewOp (addReversedInputs o ts)
-
-addReversedInputs :: OpDef -> [Output] -> OpDef
-addReversedInputs o ts = o & opInputs <>~ reverse ts
-
--- | Class of types that can be used as op functions.
-class BuildOp f where
-    buildOp' :: [Int64]  -- ^ Sizes of list results (having number_attr)
-             -> OpDef
-             -> [Output] -- ^ Accumulator for inputs to the op.
-             -> f
-
--- | Starts an operation that returns a structured set of tensors
--- (singletons or tuples).
-buildOp :: BuildOp f => OpDef -> f
-buildOp o = buildOp' [] o []
-
--- | Starts an operation that returns a list of tensors.
-buildListOp :: BuildOp f => [Int64]
-               -- ^ Cardinality of the corresponding list of tensors output.
-               -> OpDef -> f
-buildListOp counts o = buildOp' counts o []
-
-instance OpResult a => BuildOp (Build a) where
-    buildOp' = buildResult
-
-instance BuildOp f => BuildOp (ResourceHandle a -> f) where
-    buildOp' rf o ts (ResourceHandle t) = buildOp' rf o (t : ts)
-
-instance BuildOp f => BuildOp (Tensor v a -> f) where
-    buildOp' rf o ts t = buildOp' rf o (t ^. tensorOutput : ts)
-
-instance BuildOp f => BuildOp ([Tensor v a] -> f) where
-    buildOp' rf o accum ts
-        = buildOp' rf o (reverse (fmap (^. tensorOutput) ts) ++ accum)
+buildResult :: OpResult a => [Int64] -> OpDef -> BuildResult a
+buildResult ns = liftResult $ \o ->
+        runResult ns . Op . NodeName . (^. name) <$> addNewOp o
 
 -- | Returns true if all the integers in each tuple are identical.
 -- Throws an error with a descriptive message if not.
@@ -166,3 +134,19 @@ eqLengthGuard = all eachOk
     eachOk (numberAttrName, pairs@((_, x) : zs)) = all (\z -> snd z == x) zs ||
         error ("number_attr " ++ numberAttrName ++
                " contains tensors with different length " ++ show pairs)
+
+
+class IsResult f where
+    type ResultType f
+    liftResult :: (OpDef -> Build (ResultType f)) -> OpDef -> f
+
+instance IsResult (Build a) where
+    type ResultType (Build a) = a
+    liftResult = id
+
+instance IsResult f => IsResult ((OpDef -> OpDef) -> f) where
+    type ResultType ((OpDef -> OpDef) -> f) = ResultType f
+    liftResult f o g = liftResult f (g o)
+
+-- TODO: better naming
+type BuildResult a = forall f . (IsResult f, a ~ ResultType f) => f

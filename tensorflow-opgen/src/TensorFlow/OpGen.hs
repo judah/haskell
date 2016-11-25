@@ -119,7 +119,9 @@ docOpList flags opList =
         , "{-# LANGUAGE DataKinds #-}"
         , "{-# LANGUAGE FlexibleInstances #-}"
         , "{-# LANGUAGE OverloadedStrings #-}"
+        , "{-# LANGUAGE RankNTypes #-}"
         , "{-# LANGUAGE ScopedTypeVariables #-}"
+        , "{-# LANGUAGE TypeFamilies #-}"
           -- Avoids reports about shadowing standard library names.
         , "{-# OPTIONS_GHC -fno-warn-name-shadowing #-}"
           -- eqLengthGuard never returns false and dies instead.
@@ -147,10 +149,10 @@ imports = stack [
     , "import Data.Complex (Complex)"
     , "import Data.Int (Int8, Int16, Int32, Int64)"
     , "import Data.Word (Word8, Word16)"
-    , "import Lens.Family2 ((.~), (&))"
+    , "import Lens.Family2 ((.~), (&), (^.))"
     , "import TensorFlow.Build"
     , "import TensorFlow.BuildOp"
-    , "import TensorFlow.Output (ResourceHandle)"
+    , "import TensorFlow.Output (ResourceHandle(..))"
     , "import TensorFlow.Tensor"
     , "import TensorFlow.Types"
     ]
@@ -216,11 +218,8 @@ whereClause as = [indent 2 $ "where" </> indent 2 (stack $ map defineLengthAttr 
 
 functionBody :: ParsedOp -> Doc
 functionBody pOp = buildFunction <+> parens (hang 0 (stack buildOpParts))
-                        </> indent indentation (sep tensorArgs)
   where
-    buildFunction
-        | null outputListsSizes = "buildOp"
-        | otherwise = "buildListOp" <+>
+    buildFunction = "buildResult" <+>
                         brackets (commasep $
                                     map renderHaskellName outputListsSizes)
     outputListsSizes = [ a
@@ -241,8 +240,21 @@ functionBody pOp = buildFunction <+> parens (hang 0 (stack buildOpParts))
         [ "& opAttr" <+> renderQuotedTFName n <+> ".~" <+> renderHaskellName n
         | a <- inferredListSizeAttrs pOp, let n = attrName a
         ]
+        ++ if null (parsedInputs pOp)
+            then []
+            else ["& opInputs .~ " <+> inputsList (parsedInputs pOp)]
 
-    tensorArgs = renderHaskellName . parsedArgName <$> parsedInputs pOp
+inputsList :: [ParsedArg] -> Doc
+inputsList [] = "[]"
+inputsList (t:ts) = case parsedArgCase t of
+    SimpleArg{} -> outputSelector <+> n <+> ":" <+> inputsList ts
+    ListArg{} -> "map" <+> outputSelector <+> n <+> "++" <+> inputsList ts
+  where
+    n = renderHaskellName $ parsedArgName t
+    outputSelector = case parsedArgKind t of
+                        -- TODO: clean this up
+                        ArgResource -> "(\\(ResourceHandle h) -> h)"
+                        _ -> "(^. tensorOutput)"
 
 -- | Write a comment with the inputs/outputs/attributes in proto format, for
 -- debugging.
@@ -293,7 +305,7 @@ typeSig pOp = constraints
         -- TODO(judahjacobson): To improve indentation: `tensorArgAndComment a`
         [a] -> wrapBuild (tensorArg a) <+> "-- ^" <+> argComment a
         as -> wrapBuild (tuple (map tensorArg as)) <+/> resultComment as
-    wrapBuild o = "Build" <+> parens o
+    wrapBuild o = "BuildResult" <+> parens o
 
 -- | Render an op input or output.
 -- For example: "Tensor Ref Int64", "Tensor v t", "ResourceHandle dtype"

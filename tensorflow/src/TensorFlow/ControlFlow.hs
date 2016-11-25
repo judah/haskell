@@ -12,6 +12,8 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- TODO: we should use OpGen for most of this
+
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
@@ -50,7 +52,8 @@ withControlDependencies deps act = withNodeDependencies (nodes deps) act
 -- When this op finishes, all ops in the input @n@ have finished.  This op has
 -- no output.
 group :: Nodes t => t -> Build ControlNode
-group deps = buildOp $ opDef "NoOp" & opControlInputs .~ Set.toList (nodes deps)
+group deps = buildResult []
+                $ opDef "NoOp" & opControlInputs .~ Set.toList (nodes deps)
 
 
 -- | Returns a 'Tensor' with the same shape and contents as the input.
@@ -72,12 +75,14 @@ namedIdentity :: forall a v . TensorType a
               => PendingNodeName -> Tensor v a -> Build (Tensor v a)
 namedIdentity n t =
     case t ^. tensorKind of
-        ValueKind -> buildOp (opDefWithName n "Identity" & setTypeAttr) t
-        RefKind -> buildOp (opDefWithName n "RefIdentity" & setTypeAttr) t
+        ValueKind -> buildResult [] (opDefWithName n "Identity"
+                                        & setAttr)
+        RefKind -> buildResult [] (opDefWithName n "RefIdentity" & setAttr)
   where
-    setTypeAttr = opAttr "T" .~ tensorType (undefined :: a)
+    setAttr = (opAttr "T" .~ tensorType (undefined :: a))
+                . (opInputs .~ [t ^. tensorOutput])
 
 
 -- | Does nothing.  Only useful as a placeholder for control edges.
 noOp :: Build ControlNode
-noOp = buildOp $ opDef "NoOp"
+noOp = buildResult [] $ opDef "NoOp"
