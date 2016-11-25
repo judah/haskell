@@ -39,7 +39,7 @@ import Data.ProtoLens.TextFormat (showMessage)
 import Data.Set (Set)
 import Data.Text (Text)
 import Data.Tuple (swap)
-import Lens.Family2 (Lens', (&), (^.), (.~), (%~))
+import Lens.Family2 (Lens', (&), (^.), (.~), (%~), to)
 import Lens.Family2.State.Strict (uses)
 import Lens.Family2.Stock (at, intAt)
 import Lens.Family2.Unchecked (lens, iso)
@@ -57,11 +57,11 @@ import qualified Data.Text as Text
 import qualified TensorFlow.GenOps.Core as CoreOps
 import TensorFlow.Build
     ( Build
-    , render
-    , renderNodeName
     , renderedNodeDefs
     , opDef
     , opAttr
+    , opInputs
+    , Expr
     )
 import TensorFlow.BuildOp
 import TensorFlow.Ops
@@ -83,17 +83,18 @@ import TensorFlow.Ops
     )
 import TensorFlow.Output
     ( NodeName(..)
-    , Op (Rendered)
+    , Op (Op)
     , Output(..)
     , OutputIx(..)
     , outputIndex
+    , outputOp
+    , unOp
     )
 import TensorFlow.Tensor
     ( Tensor(..)
     , TensorKind (ValueKind)
     , Value
     , tensorOutput
-    , tensorAttr
     )
 import TensorFlow.Types (Attribute, OneOf, TensorType, attrLens)
 import Proto.Tensorflow.Core.Framework.NodeDef
@@ -147,7 +148,7 @@ gradients y xs = do
     --
     -- 4. Lookup the recorded gradient for each x in xs.
 
-    yName <- renderNodeName y
+    let yName = y ^. tensorOutput . outputOp . to unOp 
     -- TODO(fmayle): Move this into Build.hs and call it unsafeNodeDefFromName?
     nodeDefLookup :: (NodeName -> NodeDef) <- uses renderedNodeDefs $
         (\f x -> fromMaybe (error $ "no NodeDef found for " ++ show x) (f x))
@@ -164,8 +165,8 @@ gradients y xs = do
     gradientMap <- graphGrads gr initPending
     -- Lookup the gradients for each x.
     forM xs $ \x -> do
-        xName <- renderNodeName x
-        render $ fromMaybe (zerosLike x) $ do
+        let xName = x ^. tensorOutput . outputOp . to unOp
+        return $ fromMaybe (zerosLike x) $ do
             n <- nodeMap ^. at xName
             let i = x ^. tensorOutput . outputIndex
             gradientMap ^. at n . nonEmpty . outputIxAt i
@@ -276,13 +277,13 @@ calculateInputGrads (inputEdges, _, nodeDef, _) outputGrads gr =
     opGrad (nodeDef ^. op) nodeDef inputTensors fullOutGrads
   where
     fullOutGrads =
-        fullOutputGrads (numOutputs nodeDef) (Rendered nodeDef) outputGrads
+        fullOutputGrads (numOutputs nodeDef) (Op nodeDef) outputGrads
     -- Create a tensor from an edge (technically an Output, but it seems less
     -- confusing to refer to it as a tensor here).
     edgeToTensor :: (EdgeLabel, FGL.Node) -> Output
     edgeToTensor ((i, _), n) =
         case FGL.lab gr n of
-            Just edgeNodeDef -> Output i (Rendered edgeNodeDef)
+            Just edgeNodeDef -> Output i (Op edgeNodeDef)
             Nothing -> error $ "calculateInputGrads: missing input node for "
                                ++ Text.unpack (nodeDef ^. name)
     -- Input tensors, sorted by input index.
@@ -392,29 +393,30 @@ createGraph nodeName nodeDefLookup = (FGL.nmap nodeDefLookup graph, nodeMap)
 type GradientFunc a = NodeDef
                     -> [Output]
                     -- ^ Input tensors.
-                    -> [Tensor Value a]
+                    -> [Expr (Tensor Value a)]
                     -- ^ Gradient of y w.r.t. each output tensor.
-                    -> [Maybe (Tensor Value a)]
+                    -> [Maybe (Expr (Tensor Value a))]
                     -- ^ Gradient of y w.r.t. each input tensor.
 
 
 -- TODO(fmayle): Assert the type is correct.
 -- | Create a Tensor from an Output.
-toT :: Output -> Tensor Value a
-toT = Tensor ValueKind
+-- TODO: maybe just return Tensor, and add "pure"s everywhere?
+toT :: Output -> Expr (Tensor Value a)
+toT = pure . Tensor ValueKind
 
 
 -- | Wrapper around `TensorFlow.GenOps.Core.slice` that builds vectors from scalars for
 -- simple slicing operations.
 flatSlice :: forall v1 t . (TensorType t)
-         => Tensor v1 t    -- ^ __input__
+         => Expr (Tensor v1 t)    -- ^ __input__
          -> Int32          -- ^ __begin__: specifies the offset into the first dimension of
                            -- 'input' to slice from.
          -> Int32          -- ^ __size__: specifies the number of elements of the first dimension
                            -- of 'input' to slice. If size is -1, all remaining elements in the dimension
                            -- are included in the slice (i.e. this is equivalent to setting
                            -- size = input.dim_size(0) - begin).
-         -> Tensor Value t -- ^ __output__
+         -> Expr (Tensor Value t) -- ^ __output__
 flatSlice t begin size = CoreOps.slice t (vector [begin]) (vector [size])
 
 
@@ -445,20 +447,20 @@ opGrad "Gather" _ [toT -> x, toT -> indices] [dz] =
     ]
   where
     -- TODO(gnezdo): Use colocateWith but it requires Build monad.
-    denseShape = shape (x :: Tensor Value a)
+    denseShape = shape (x :: Expr (Tensor Value a))
     numRows = scalarize $ flatSlice denseShape 0 1
     valuesShape = CoreOps.concat 0 [ allDimensions
                                    , flatSlice denseShape 1 (-1)
                                    ]
     values = reshape dz valuesShape
     -- TODO(fmayle): This could be either Int32 or Int64.
-    indices' = reshape indices allDimensions :: Tensor Value Int32
+    indices' = reshape indices allDimensions :: Expr (Tensor Value Int32)
 
 opGrad "Max" _ [toT -> x, toT -> indices] [dz] =
     [Just $ indicators `CoreOps.div` numSelected * dz', Nothing]
   where
-    sx = shape (x :: Tensor Value a)
-    outputShapeKeptDims = reducedShape sx (indices :: Tensor Value Int32)
+    sx = shape (x :: Expr (Tensor Value a))
+    outputShapeKeptDims = reducedShape sx (indices :: Expr (Tensor Value Int32))
     x' = reshape x outputShapeKeptDims
     dz' = reshape dz outputShapeKeptDims
     indicators = CoreOps.cast $ CoreOps.equal x' x
@@ -471,8 +473,8 @@ opGrad "Sum" _ [toT -> x, toT -> indices] [dz] =
     [ Just $ CoreOps.tile grad tileScaling, Nothing ]
   where
     -- TODO(gnezdo): Implement the fast-path from math_grad._SumGrad.
-    sx = shape (x :: Tensor Value a)
-    outputShapeKeptDims = reducedShape sx (indices :: Tensor Value Int32)
+    sx = shape (x :: Expr (Tensor Value a))
+    outputShapeKeptDims = reducedShape sx (indices :: Expr (Tensor Value Int32))
     tileScaling = safeShapeDiv sx outputShapeKeptDims
     grad = reshape dz outputShapeKeptDims
 
@@ -480,8 +482,8 @@ opGrad "Mean" u v@[toT -> x, _] w =
     [Just $ dz `CoreOps.div` CoreOps.cast factor, Nothing]
   where
     [Just dz, Nothing] = opGrad "Sum" u v w
-    inputShape = shape (x :: Tensor Value a)
-    outputShape = shape (dz :: Tensor Value a)
+    inputShape = shape (x :: Expr (Tensor Value a))
+    outputShape = shape (dz :: Expr (Tensor Value a))
     -- TODO(fmayle): Add fast path when shape is known.
     inputSize = CoreOps.prod inputShape $ rangeOfRank inputShape
     outputSize = CoreOps.prod outputShape $ rangeOfRank outputShape
@@ -491,8 +493,8 @@ opGrad "Add" _ [toT -> x, toT -> y] [dz] =
     [ Just $ reshape (sum dz rx) sx
     , Just $ reshape (sum dz ry) sy ]
   where
-    sx = shape (x :: Tensor Value a)
-    sy = shape (y :: Tensor Value a)
+    sx = shape (x :: Expr (Tensor Value a))
+    sy = shape (y :: Expr (Tensor Value a))
     (rx, ry) = broadcastGradientArgs sx sy
 
 opGrad "Sub" u v w =
@@ -509,8 +511,8 @@ opGrad "Mul" _ [toT -> x, toT -> y] [dz] =
     [ Just $ reshape (sum (dz * y) rx) sx
     , Just $ reshape (sum (x * dz) ry) sy ]
   where
-    sx = shape (x :: Tensor Value a)
-    sy = shape (y :: Tensor Value a)
+    sx = shape (x :: Expr (Tensor Value a))
+    sy = shape (y :: Expr (Tensor Value a))
     (rx, ry) = broadcastGradientArgs sx sy
 
 opGrad "Div" _ [toT -> x, toT -> y] [dz] =
@@ -520,46 +522,46 @@ opGrad "Div" _ [toT -> x, toT -> y] [dz] =
     , Just $ reshape (sum (dz * (negate x `CoreOps.div` (y * y))) ry) sy
     ]
   where
-    sx = shape (x :: Tensor Value a)
-    sy = shape (y :: Tensor Value a)
+    sx = shape (x :: Expr (Tensor Value a))
+    sy = shape (y :: Expr (Tensor Value a))
     (rx, ry) = broadcastGradientArgs sx sy
 
 opGrad "MatMul" nodeDef [toT -> x, toT -> y] [dz] =
     let transposeA = lookupAttr nodeDef "transpose_a"
         transposeB = lookupAttr nodeDef "transpose_b"
         transAttrs a b =
-            (tensorAttr "transpose_a" .~ a) . (tensorAttr "transpose_b" .~ b)
+            (opAttr "transpose_a" .~ a) . (opAttr "transpose_b" .~ b)
     in case (transposeA, transposeB) of
        (False, False) ->
-           [ Just $ (dz `matMul` y) & transAttrs False True
-           , Just $ (x `matMul` dz) & transAttrs True False ]
+           [ Just $ (dz `matMul` y) (transAttrs False True)
+           , Just $ (x `matMul` dz) (transAttrs True False) ]
        (False, True) ->
            [ Just $ dz `matMul` y
-           , Just $ (x `matMul` dz) & transAttrs True False ]
+           , Just $ (x `matMul` dz) (transAttrs True False) ]
        (True, False) ->
-           [ Just $ (dz `matMul` y) & transAttrs False True
+           [ Just $ (dz `matMul` y) (transAttrs False True)
            , Just $ x `matMul` dz ]
        (True, True) ->
-           [ Just $ (dz `matMul` y) & transAttrs True True
-           , Just $ (x `matMul` dz) & transAttrs True True ]
+           [ Just $ (dz `matMul` y) (transAttrs True True)
+           , Just $ (x `matMul` dz) (transAttrs True True) ]
 
 opGrad "Transpose" _ [_, toT -> p] [dz] =
     [ Just $ CoreOps.transpose dz
-            (CoreOps.invertPermutation p :: Tensor Value Int32)
+            (CoreOps.invertPermutation p :: Expr (Tensor Value Int32))
     , Nothing
     ]
 
 opGrad "Conv2D" nodeDef [toT -> x, toT -> y] [dz] =
     [ Just $ CoreOps.conv2DBackpropInput (shape x) y dz
-          & tensorAttr "strides" .~ strides
-          & tensorAttr "padding" .~ padding
-          & tensorAttr "use_cudnn_on_gpu" .~ useCudnnOnGpu
-          & tensorAttr "data_format" .~ dataFormat
+          ( opAttr "strides" .~ strides)
+          ( opAttr "padding" .~ padding)
+          ( opAttr "use_cudnn_on_gpu" .~ useCudnnOnGpu)
+          ( opAttr "data_format" .~ dataFormat)
     , Just $ CoreOps.conv2DBackpropFilter x (shape y) dz
-          & tensorAttr "strides" .~ strides
-          & tensorAttr "padding" .~ padding
-          & tensorAttr "use_cudnn_on_gpu" .~ useCudnnOnGpu
-          & tensorAttr "data_format" .~ dataFormat
+          ( opAttr "strides" .~ strides)
+          ( opAttr "padding" .~ padding)
+          ( opAttr "use_cudnn_on_gpu" .~ useCudnnOnGpu)
+          ( opAttr "data_format" .~ dataFormat)
     ]
   where
     strides = lookupAttr nodeDef "strides" :: [Int64]
@@ -569,21 +571,21 @@ opGrad "Conv2D" nodeDef [toT -> x, toT -> y] [dz] =
 
 opGrad "MaxPool" nodeDef [toT -> x] [dz] =
     [ Just $ CoreOps.maxPoolGrad x output dz
-          & tensorAttr "ksize" .~ ksize
-          & tensorAttr "strides" .~ strides
-          & tensorAttr "padding" .~ padding
-          & tensorAttr "data_format" .~ dataFormat
+          (opAttr "ksize" .~ ksize)
+          ( opAttr "strides" .~ strides)
+          ( opAttr "padding" .~ padding)
+          ( opAttr "data_format" .~ dataFormat)
     ]
   where
-    output :: Tensor Value a
-    output = toT $ Output 0 (Rendered nodeDef)
+    output :: Expr (Tensor Value a)
+    output = toT $ Output 0 (Op $ NodeName $ nodeDef ^. name)
     ksize = lookupAttr nodeDef "ksize" :: [Int64]
     strides = lookupAttr nodeDef "strides" :: [Int64]
     padding = lookupAttr nodeDef "padding" :: ByteString
     dataFormat = lookupAttr nodeDef "data_format" :: ByteString
 
 opGrad "Reshape" _ [toT -> x, _] [dz] =
-    [Just $ reshape dz $ shape (x :: Tensor Value a), Nothing]
+    [Just $ reshape dz $ shape (x :: Expr (Tensor Value a)), Nothing]
 
 opGrad "OneHot" _ _ _ = [Nothing, Nothing, Nothing, Nothing]
 opGrad "TruncatedNormal" _ _ _ = [Nothing]
@@ -593,10 +595,12 @@ opGrad "Cast" nodeDef _ [dz] = [Just reverseCast]
   where
     -- TODO(gnezdo): too permissive, python only allows float types as src_type.
     reverseCast =
-        buildOp (opDef "Cast"
+        exprResult [] $ do
+            dz' <- dz
+            pure (opDef "Cast"
                  & opAttr "DstT" .~ (lookupAttr nodeDef "SrcT" :: ByteString)
-                 & opAttr "SrcT" .~ (lookupAttr nodeDef "DstT" :: ByteString))
-        dz
+                 & opAttr "SrcT" .~ (lookupAttr nodeDef "DstT" :: ByteString)
+                 & opInputs .~ [dz' ^. tensorOutput])
 
 opGrad "DynamicStitch" nodeDef inputs [dz] =
     replicate halfLen Nothing ++ valuesGrads
@@ -607,7 +611,7 @@ opGrad "DynamicStitch" nodeDef inputs [dz] =
         in if 2 * half == len
            then half
            else error ("Uneven input size " ++ show (len, showMessage nodeDef))
-    valuesGrads = [ Just $ CoreOps.gather dz (toT idx :: Tensor Value Int32)
+    valuesGrads = [ Just $ CoreOps.gather dz (toT idx :: Expr (Tensor Value Int32))
                   | idx <- take halfLen inputs
                   ]
 
@@ -615,14 +619,14 @@ opGrad "DynamicPartition" nodeDef [toT -> xs, toT -> indices] dz =
     [ Just reconstructed, Nothing ]
   where
     reconstructed = CoreOps.reshape stitched
-                    (CoreOps.shape (xs :: Tensor Value a) :: Tensor Value Int32)
+                    (CoreOps.shape (xs :: Expr (Tensor Value a)) :: Expr (Tensor Value Int32))
     stitched = CoreOps.dynamicStitch partitionedIndices dz
     partitionedIndices = CoreOps.dynamicPartition np originalIndices indices
     np = lookupAttr nodeDef "num_partitions" :: Int64
     originalIndices =
         CoreOps.reshape (CoreOps.range 0 (CoreOps.size indices) 1) prefixShape
     prefixShape = shapeInt32 indices
-    shapeInt32 = CoreOps.shape :: Tensor Value Int32 -> Tensor Value Int32
+    shapeInt32 = CoreOps.shape :: Expr (Tensor Value Int32) -> Expr (Tensor Value Int32)
 
 opGrad "Select" _ [toT -> c, toT -> x, _] [dz] =
     [ Nothing
@@ -638,12 +642,12 @@ opGrad "Log" _ [toT -> x] [dz] = [ Just $ dz * CoreOps.inv x ]
 opGrad "Exp" _ [toT -> x] [dz] = [ Just $ dz * CoreOps.exp x ]
 opGrad "SparseSegmentSum" _ [toT -> x, toT -> y, toT -> t] [dz] =
     [ Just $ CoreOps.unsortedSegmentSum
-             (CoreOps.gather dz (t :: Tensor Value Int32))
-             (y :: Tensor Value Int32) inputRows
+             (CoreOps.gather dz (t :: Expr (Tensor Value Int32)))
+             (y :: Expr (Tensor Value Int32)) inputRows
     , Nothing
     , Nothing
     ]
-  where inputRows = flatSlice (shape (x :: Tensor Value a)) 0 1
+  where inputRows = flatSlice (shape (x :: Expr (Tensor Value a))) 0 1
 
 opGrad "LabelClasses" _ _ _ = [Nothing, Nothing]
 opGrad "LabelWeights" _ _ _ = [Nothing]
@@ -703,13 +707,13 @@ numOutputs o =
         _ -> error $ "numOuputs not implemented for " ++ show (o ^. op)
 
 -- Divides `x / y` assuming `x, y >= 0`, treating `0 / 0 = 0`
-safeShapeDiv :: Tensor v1 Int32 -> Tensor v2 Int32 -> Tensor Value Int32
+safeShapeDiv :: Expr (Tensor v1 Int32) -> Expr (Tensor v2 Int32) -> Expr (Tensor Value Int32)
 safeShapeDiv x y = x `CoreOps.div` (CoreOps.maximum y 1)
 
-allDimensions :: Tensor Value Int32
+allDimensions :: Expr (Tensor Value Int32)
 allDimensions = vector [-1 :: Int32]
 
-rangeOfRank :: forall v1 t. TensorType t => Tensor v1 t -> Tensor Value Int32
+rangeOfRank :: forall v1 t. TensorType t => Expr (Tensor v1 t) -> Expr (Tensor Value Int32)
 rangeOfRank x = CoreOps.range 0 (CoreOps.rank x) 1
 
 lookupAttr ::  Attribute a1 => NodeDef -> Text -> a1

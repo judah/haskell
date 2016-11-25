@@ -14,6 +14,7 @@
 
 -- TODO: we should use OpGen for most of this
 
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
@@ -51,7 +52,7 @@ withControlDependencies deps act = withNodeDependencies (nodes deps) act
 --
 -- When this op finishes, all ops in the input @n@ have finished.  This op has
 -- no output.
-group :: Nodes t => t -> Build ControlNode
+group :: Nodes t => t -> BuildResult ControlNode
 group deps = buildResult []
                 $ pure $ opDef "NoOp" & opControlInputs .~ Set.toList (nodes deps)
 

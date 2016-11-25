@@ -292,8 +292,6 @@ getPendingNode o = do
                   & input .~ (inputs ++ controlInputs)
                   & device .~ dev
   where
-    makeInput (Output (OutputIx k) (Op o))
-        = (unNodeName o <> ":" <> Text.pack (show k))
     makeDep = ("^" <>) . unNodeName
 
 -- | Pick a name for a pending node.  If it has an explicit name, just use that;

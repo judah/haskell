@@ -23,7 +23,7 @@ module TensorFlow.EmbeddingOps where
 
 import Control.Monad (zipWithM)
 import Data.Int (Int32, Int64)
-import TensorFlow.Build (Build, colocateWith, render)
+import TensorFlow.Build (Build, colocateWith)
 import TensorFlow.Ops (shape, vector)  -- Also Num instance for Tensor
 import TensorFlow.Tensor (Tensor, Value)
 import TensorFlow.Types (OneOf, TensorType)
