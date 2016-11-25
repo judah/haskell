@@ -55,7 +55,7 @@ import Proto.Tensorflow.Core.Framework.Graph (node)
 import Proto.Tensorflow.Core.Protobuf.Config (ConfigProto)
 import TensorFlow.Build
 import TensorFlow.Nodes
-import TensorFlow.Output (NodeName, unNodeName)
+import TensorFlow.Output (NodeName, unNodeName, renderOutput)
 import TensorFlow.Tensor
 
 import qualified Data.ByteString.Builder as Builder
@@ -166,22 +166,19 @@ buildAnd f m = build m >>= f
 run :: Fetchable t a => t -> Session a
 run = runWithFeeds []
 
+-- TODO: update comments around rendering
+
 -- | Run a subgraph 't', rendering any dependent nodes that aren't already
 -- rendered, feed the given input values, and fetch the corresponding result
 -- values for 'a'.
 runWithFeeds :: Fetchable t a => [Feed] -> t -> Session a
 runWithFeeds feeds t = do
-    ns <- build $ getNodes t
-    -- Note that this call to "fetch" shouldn't affect the following "extend"
-    -- call, since all nodes in t and its inputs/deps will be rendered by the
-    -- above call to getNodes.
-    fetch <- build $ getFetch t
-    runFetchWithFeeds feeds ns fetch
+    runFetchWithFeeds feeds (nodes t) (fetch t)
 
 runFetchWithFeeds :: [Feed] -> Set NodeName -> Fetch a -> Session a
 runFetchWithFeeds feeds target (Fetch fetch restore) = do
     extend
-    feeds' <- build $ fixFeeds feeds
+    let feeds' = fixFeeds feeds
     let fetchNames = encodeUtf8 <$> Set.toList fetch
         targetNames = toNodeNames $ Set.toList target
     session <- Session (asks rawSession)
@@ -206,12 +203,10 @@ run_ = runWithFeeds_ []
 -- values for 'a'.  This behaves like 'runWithFeeds' except that it doesn't do
 -- any fetches.
 runWithFeeds_ :: Nodes t => [Feed] -> t -> Session ()
-runWithFeeds_ feeds t = do
-    ns <- build $ getNodes t
-    runFetchWithFeeds feeds ns (pure ())
+runWithFeeds_ feeds t = runFetchWithFeeds feeds (nodes t) (pure ())
 
-fixFeeds :: [Feed] -> Build [(ByteString, FFI.TensorData)]
-fixFeeds = mapM $ \(Feed o d) -> (,d) . encodeUtf8 <$> renderOutput o
+fixFeeds :: [Feed] -> [(ByteString, FFI.TensorData)]
+fixFeeds = map $ \(Feed o d) -> (,d) $ encodeUtf8 $ renderOutput o
 
 -- | Starts a concurrent thread which evaluates the given Nodes
 -- forever until runSession exits or an exception occurs. Graph
@@ -220,10 +215,8 @@ fixFeeds = mapM $ \(Feed o d) -> (,d) . encodeUtf8 <$> renderOutput o
 asyncProdNodes :: Nodes t
                   => t  -- ^ Node to evaluate concurrently.
                   -> Session ()
-asyncProdNodes nodes = do
-    target <- build (getNodes nodes)
-    extend
-    let targetNames = toNodeNames $ Set.toList target
+asyncProdNodes ns = do
+    let targetNames = toNodeNames $ Set.toList $ nodes ns
     state <- Session ask
     let loop = forever (void (FFI.run (rawSession state) [] [] targetNames))
     liftIO (asyncCollector state loop)

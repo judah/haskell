@@ -23,7 +23,6 @@ module TensorFlow.Output
     -- * Ops
     , NodeName(..)
     , Op(..)
-    , opUnrendered
     , OpDef(..)
     , opName
     , opType
@@ -36,11 +35,13 @@ module TensorFlow.Output
     , output
     , outputIndex
     , outputOp
+    , renderOutput
     , PendingNodeName(..)
     , ResourceHandle(..)
     )  where
 
 import qualified Data.Map.Strict as Map
+import Data.Monoid ((<>))
 import Data.ProtoLens.TextFormat (showMessage)
 import Data.String (IsString(..))
 import Data.Text (Text)
@@ -68,6 +69,20 @@ instance IsString OpType where
 -- | An output of a TensorFlow node.
 data Output = Output !OutputIx !Op
     deriving (Eq, Ord, Show)
+                         -- device, name, and scope.
+
+-- | A string representation for the TensorFlow foreign APIs.
+renderOutput :: Output -> Text
+renderOutput (Output (OutputIx i) (Op n))
+    = unNodeName n <> Text.pack (":" ++ show i)
+
+instance IsString Output where
+    fromString s = case break (==':') s of
+        (n, ':':ixStr) | [(ix, "" :: String)] <- read ixStr
+                         -> Output (fromInteger ix) $ assigned n
+        _ -> Output 0 $ assigned s
+        where assigned n = Op $ NodeName $ Text.pack n
+
 
 output :: OutputIx -> Op -> Output
 output = Output
@@ -91,23 +106,9 @@ instance Show Device where
     show (Device d) = show d
 
 -- | The representation of a node in a TensorFlow graph.
-data Op
-    = Rendered !NodeDef  -- ^ Properties are fixed, including the
-                         -- device, name, and scope.
-    | Unrendered !OpDef  -- ^ Properties are not fixed, and may change depending
-                         -- on which context this op is rendered in.
-    deriving (Eq, Ord)
-
-instance Show Op where
-    show (Rendered n) = "Rendered " ++ showMessage n
-    show (Unrendered o) = "Unrendered " ++ show (o ^. opName)
-
--- | Traverse on the 'Unrendered' of an 'Op'.
---
--- Same implementation as _Left.
-opUnrendered :: Traversal' Op OpDef
-opUnrendered f (Unrendered a) = Unrendered <$> f a
-opUnrendered _ (Rendered b) = pure (Rendered b)
+-- TODO: unify with NodeName?
+newtype Op = Op {unOp :: NodeName}
+    deriving (Show, Eq, Ord)
 
 -- | Op definition. This corresponds somewhat to the 'NodeDef' proto.
 data OpDef = OpDef
@@ -146,16 +147,6 @@ opInputs = lens _opInputs (\o x -> o {_opInputs = x})
 
 opControlInputs :: Lens' OpDef [NodeName]
 opControlInputs = lens _opControlInputs (\o x -> o {_opControlInputs = x})
-
--- TODO(gnezdo): IsString instance is weird and we should move that
--- code into a Build function
-instance IsString Output where
-    fromString s = case break (==':') s of
-        (n, ':':ixStr) | [(ix, "" :: String)] <- read ixStr
-                         -> Output (fromInteger ix) $ assigned n
-        _ -> Output 0 $ assigned s
-        where assigned n = Rendered $ def & name .~ Text.pack n
-
 
 -- | Opaque handle to a mutable resource in the graph.  Typical such
 -- resources are variables. The type parameter corresponds to the

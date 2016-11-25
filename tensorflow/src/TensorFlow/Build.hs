@@ -32,8 +32,6 @@ module TensorFlow.Build
     , opControlInputs
     -- * The Build monad
     , GraphState
-    , render
-    , renderNodeName
     , renderedNodeDefs
     , BuildT
     , Build
@@ -48,7 +46,6 @@ module TensorFlow.Build
     -- * Creating and looking up Ops
     , getOrAddOp
     , addNewOp
-    , renderOutput
     -- * Modifying all nodes in a Build action
     , colocateWith
     , withStateLens
@@ -229,9 +226,7 @@ flushInitializers = do
 -- | Registers the given node to be executed before the next
 -- 'TensorFlow.Session.run'.
 addInitializer :: ControlNode -> Build ()
-addInitializer (ControlNode o) = do
-    i <- getOrAddOp o
-    initializationNodes %= (i:)
+addInitializer (ControlNode (Op i)) = initializationNodes %= (i:)
 
 -- | Produce a GraphDef proto representation of the nodes that are rendered in
 -- the given 'Build' action.
@@ -246,16 +241,20 @@ addGraphDef g = nodeBuffer <>= g ^. node
 
 -- | Render the given op if it hasn't been rendered already, and return its
 -- name.
-getOrAddOp :: Op -> Build NodeName
+getOrAddOp :: OpDef -> Build NodeName
 getOrAddOp o = NodeName . (^. name) <$> resolveOp o
 
-resolveOp :: Op -> Build NodeDef
-resolveOp (Rendered n) = return n
-resolveOp (Unrendered o) = do
+resolveOp :: OpDef -> Build NodeDef
+resolveOp o = do
     pending <- getPendingNode o
     uses renderedNodes (Map.lookup pending) >>= \case
         Just n -> return n
         Nothing -> addNewOpFromPending pending
+
+lookupOp :: Op -> Build NodeDef
+lookupOp (Op o) = uses renderedNodeDefs (Map.lookup o) >>= \case
+    Just n -> return n
+    Nothing -> error $ "Unknown op " ++ show o 
 
 -- | Add a new node for a given 'OpDef'.  This is used for making "stateful" ops
 -- which are not safe to dedup (e.g, "variable" and "assign").
@@ -278,20 +277,20 @@ getPendingNode o = do
     -- An empty string in the proto field means that no specific
     -- device is specified.
     dev <- maybe "" deviceName <$> use defaultDevice
-    inputs <- mapM getInput (o ^. opInputs)
     scope <- use currentScope
     controls <- use defaultControlInputs
+    let inputs = map renderOutput (o ^. opInputs)
     let controlInputs
-            = map getDep (o ^. opControlInputs ++ Set.toList controls)
+            = map makeDep (o ^. opControlInputs ++ Set.toList controls)
     return $ PendingNode scope (o ^. opName)
             $ def & op .~ (unOpType (o ^. opType) :: Text)
                   & attr .~ _opAttrs o
                   & input .~ (inputs ++ controlInputs)
                   & device .~ dev
   where
-    getInput (Output (OutputIx k) subOp)
-        = (<> ":" <> Text.pack (show k)) . unNodeName <$> getOrAddOp subOp
-    getDep = ("^" <>) . unNodeName
+    makeInput (Output (OutputIx k) (Op o))
+        = (unNodeName o <> ":" <> Text.pack (show k))
+    makeDep = ("^" <>) . unNodeName
 
 -- | Pick a name for a pending node.  If it has an explicit name, just use that;
 -- if the name is implicit, assign a new unique name based on the op type.
@@ -307,13 +306,6 @@ renderPendingNode (PendingNode scope pendingName nodeDef)
             nextUnique .= succ u
             return $ nodeDef ^. op <> "_" <> Text.pack (show k)
 
-
--- | Render an 'Output' and return a string representation for the TensorFlow
--- foreign APIs.
-renderOutput :: Output -> Build Text
-renderOutput (Output (OutputIx i) o) = do
-    n <- getOrAddOp o
-    return $ unNodeName n <> Text.pack (":" ++ show i)
 
 -- | Modify some part of the state, run an action, and restore the state
 -- after that action is done.
@@ -336,7 +328,7 @@ withDevice d = withStateLens defaultDevice (const d)
 -- return would not have the desired effect.
 colocateWith :: forall a v b . Tensor v b -> Build a -> Build a
 colocateWith t x = do
-    d <- Device . (^. device) <$> resolveOp (t ^. tensorOutput . outputOp)
+    d <- Device . (^. device) <$> lookupOp (t ^. tensorOutput . outputOp)
     withDevice (Just d) x
 
 -- | Prepend a scope to all nodes rendered in the given 'Build' action.
@@ -346,20 +338,6 @@ withNameScope s = withStateLens currentScope (Scope s :)
 -- | Add control inputs to all nodes rendered in the given 'Build' action.
 withNodeDependencies :: Set NodeName -> Build a -> Build a
 withNodeDependencies nodes = withStateLens defaultControlInputs (<> nodes)
-
--- | Render a 'Tensor', fixing its name, scope, device and control inputs from
--- the 'Build' context.  Also renders any dependencies of the 'Tensor' that
--- weren't already rendered.
---
--- This operation is idempotent; @render >=> render === render@.  However,
--- rendering a (previously un-rendered) 'Tensor' in two different contexts
--- may result in two different 'Tensor's.
-render :: Tensor v a -> Build (Tensor v a)
-render = tensorOutput $ outputOp $ fmap Rendered . resolveOp
-
--- | Render a 'Tensor' and get its node's name.
-renderNodeName :: Tensor v a -> Build NodeName
-renderNodeName t = getOrAddOp (t ^. tensorOutput . outputOp)
 
 -- | Records the given summary action in Build for retrieval with
 -- 'collectAllSummaries'. The summary op is required to produce a

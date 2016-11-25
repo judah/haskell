@@ -33,6 +33,7 @@ import Lens.Family2 ((&), (<>~), (^.))
 import TensorFlow.Build
 import TensorFlow.Output
 import TensorFlow.Tensor
+import Proto.Tensorflow.Core.Framework.NodeDef (name)
 
 data ResultState = ResultState !OutputIx [Int64] deriving Show
 
@@ -115,16 +116,11 @@ runResult ns o =
         (_, ns') -> error $ "Ununsed length in runResult attributes: " ++
                             show (ns, ns')
 
--- | Make a new "pure" op, which may be deduped with identical ops within
--- the same scope.
-pureResult :: OpResult a => [Int64] -> OpDef -> [Output] -> a
-pureResult ns o ts = runResult ns $ Unrendered $ addReversedInputs o ts
-
 -- | Make a new "stateful" op, which will not be deduped with otherwise
 -- identical ops.
 buildResult :: OpResult a => [Int64] -> OpDef -> [Output] -> Build a
 buildResult ns o ts
-    = runResult ns . Rendered <$> addNewOp (addReversedInputs o ts)
+    = runResult ns . Op . NodeName . (^. name) <$> addNewOp (addReversedInputs o ts)
 
 addReversedInputs :: OpDef -> [Output] -> OpDef
 addReversedInputs o ts = o & opInputs <>~ reverse ts
@@ -146,45 +142,6 @@ buildListOp :: BuildOp f => [Int64]
                -- ^ Cardinality of the corresponding list of tensors output.
                -> OpDef -> f
 buildListOp counts o = buildOp' counts o []
-
-instance BuildOp ControlNode where
-    buildOp' _ o ts = ControlNode $ Unrendered $ addReversedInputs o ts
-
-instance BuildOp (ResourceHandle a) where
-    buildOp' = pureResult
-
-instance BuildOp (Tensor Value a) where
-    buildOp' = pureResult
-
-instance BuildOp (Tensor Ref a) where
-    buildOp' = pureResult
-
-instance BuildOp [Tensor Value a] where
-    buildOp' = pureResult
-
-instance (OpResult t1, OpResult t2) => BuildOp (t1, t2) where
-    buildOp' = pureResult
-
-instance (OpResult t1, OpResult t2, OpResult t3) => BuildOp (t1, t2, t3) where
-    buildOp' = pureResult
-
-instance (OpResult t1, OpResult t2, OpResult t3, OpResult t4)
-         => BuildOp (t1, t2, t3, t4) where
-    buildOp' = pureResult
-
-instance (OpResult t1, OpResult t2, OpResult t3, OpResult t4, OpResult t5)
-         => BuildOp (t1, t2, t3, t4, t5) where
-    buildOp' = pureResult
-
-instance ( OpResult t1
-         , OpResult t2
-         , OpResult t3
-         , OpResult t4
-         , OpResult t5
-         , OpResult t6
-         )
-         => BuildOp (t1, t2, t3, t4, t5, t6) where
-    buildOp' = pureResult
 
 instance OpResult a => BuildOp (Build a) where
     buildOp' = buildResult

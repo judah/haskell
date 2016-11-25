@@ -50,7 +50,6 @@ module TensorFlow.Core
       -- * Build
     , Build
     , BuildT
-    , render
     , asGraphDef
     , addGraphDef
 
@@ -60,7 +59,6 @@ module TensorFlow.Core
     , Value
     , Ref
     , TensorKind(..)
-    , tensorAttr
     , value
     , tensorFromName
       -- ** Element types
