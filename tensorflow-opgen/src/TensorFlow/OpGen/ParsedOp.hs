@@ -69,7 +69,7 @@ data ParsedOp = ParsedOp
         -- Attributes which are list sizes (ints) that are inferred automatically
         -- from one or more of the input tensors.
         -- Associated with the list of tensors whose size it describes.
-    , parsedOpIsMonadic :: Bool
+    , parsedOpIsStateful :: Bool
         -- ^ Whether this op is stateful or takes a stateful input.  Such ops
         -- should not be CSE'd and must be monadic in our API (i.e., return a
         -- Build action).
@@ -207,7 +207,7 @@ parseOp o = ParsedOp
     { parsedOpName = makeName $ o ^. name
     , parsedOpSummary = o ^. summary
     , parsedOpDescription = o ^. description
-    , parsedOpIsMonadic = o ^. isStateful
+    , parsedOpIsStateful = o ^. isStateful
                             || any (isRefKind . parsedArgKind) parsedInputs
     , ..
     }

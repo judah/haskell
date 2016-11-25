@@ -77,7 +77,7 @@ module TensorFlow.Ops
     , CoreOps.mul
     , CoreOps.neg
     , CoreOps.pack
-    , placeholder
+    , CoreOps.placeholder
     , CoreOps.range
     , reducedShape
     , CoreOps.relu
@@ -96,7 +96,7 @@ module TensorFlow.Ops
     , CoreOps.sub
     , CoreOps.sum
     , CoreOps.transpose
-    , truncatedNormal
+    , CoreOps.truncatedNormal
     , CoreOps.variable
     , vector
     , zeros
@@ -154,11 +154,6 @@ matTranspose :: forall a v . TensorType a
              => Tensor v a -> Tensor Value a
 matTranspose = flip CoreOps.transpose (vector [1, 0 :: Int32])
 
-placeholder :: forall a . TensorType a => Shape -> Build (Tensor Value a)
-placeholder shape' =
-    buildOp $ opDef "Placeholder"
-            & opAttr "dtype" .~ tensorType (undefined :: a)
-            & opAttr "shape" .~ shape'
 
 -- | Creates a variable initialized to the given value.
 -- Initialization happens next time session runs.
@@ -167,12 +162,7 @@ initializedVariable :: forall a . TensorType a
 initializedVariable initializer = do
     v <- CoreOps.variable []  -- The shape is not known initially.
     (i :: Tensor Ref a) <-
-        buildOp (opDef "Assign"
-                 & opAttr "T" .~ tensorType (undefined :: a)
-                 & opAttr "use_locking" .~ True
-                 & opAttr "validate_shape" .~ False
-                 )
-        v initializer
+        CoreOps.assign v initializer (opAttr "validate_shape" .~ False)
     addInitializer =<< group i
     return v
 
@@ -191,7 +181,7 @@ save path xs = do
     let toByteStringTensor = scalar . encodeUtf8 . unNodeName
     names <- mapM (fmap toByteStringTensor . renderNodeName) xs
     let types = replicate (length xs) (tensorType (undefined :: a))
-    let saveOp = buildOp $ opDef "Save"
+    let saveOp = buildResult [] $ opDef "Save"
                          & opAttr "T" .~ types
     saveOp (scalar path) (CoreOps.pack names) xs
 
@@ -204,11 +194,9 @@ restoreFromName :: forall a . TensorType a
                 -> ByteString    -- ^ Tensor name override.
                 -> Tensor Ref a  -- ^ Tensor to restore.
                 -> Build ControlNode
-restoreFromName path name x = do
-    let restoreOp = buildOp $ opDef "Restore"
-                            & opAttr "dt" .~ tensorType (undefined :: a)
-    group =<< CoreOps.assign x
-                (restoreOp (scalar path) (scalar name) :: Tensor Value a)
+restoreFromName path name x =
+    CoreOps.restore (scalar path) (scalar name)
+                >>= CoreOps.assign x >>= group
 
 -- | Restore a tensor's value from a checkpoint file.
 restore :: forall a . TensorType a
@@ -226,12 +214,10 @@ restore path x = do
 --   element 0:   index (0, ..., 0)
 --   element 1:   index (0, ..., 1)
 --   ...
-constant :: forall a . TensorType a => Shape -> [a] -> Tensor Value a
+constant :: forall a . TensorType a => Shape -> [a] -> Build (Tensor Value a)
 constant (Shape shape') values
     | invalidLength = error invalidLengthMsg
-    | otherwise = buildOp $ opDef "Const"
-                          & opAttr "value" .~ typedNode
-                          & opAttr "dtype" .~ nodeType
+    | otherwise = const (opAttr "value" .~ typedNode)
   where
     invalidLength = product shape' /= fromIntegral (length values)
     invalidLengthMsg = printf "invalid tensor length: expected %d got %d"
@@ -261,14 +247,6 @@ vector xs = constant [fromIntegral $ length xs] xs
 -- | Create a constant scalar.
 scalar :: forall a . TensorType a => a -> Tensor Value a
 scalar x = constant [] [x]
-
--- Random tensor from the unit normal distribution with bounded values.
-truncatedNormal :: forall a v . TensorType a
-                => Tensor v Int64  -- ^ Shape.
-                -> Build (Tensor Value a)
-truncatedNormal = buildOp $ opDef "TruncatedNormal"
-                          & opAttr "dtype" .~ tensorType (undefined :: a)
-                          & opAttr "T" .~ tensorType (undefined :: Int64)
 
 zeros :: forall a . (Num a, TensorType a) => Shape -> Tensor Value a
 zeros (Shape shape') = CoreOps.fill (vector $ map fromIntegral shape') (scalar 0)

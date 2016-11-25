@@ -43,6 +43,10 @@ module TensorFlow.Build
     , addGraphDef
     , flushInitializers
     , flushNodeBuffer
+    -- * The Expr monad
+    , Expr
+    , expr
+    , unsafeToExpr
     -- * Creating and looking up Ops
     , getOrAddOp
     , addNewOp
@@ -352,3 +356,12 @@ addSummary t = summaries %= (t :)
 -- repeatedly, the values accumulate.
 collectAllSummaries :: Monad m => BuildT m [SummaryTensor]
 collectAllSummaries = use summaries
+
+newtype Expr a = Expr (Build a)
+    deriving (Functor, Applicative, Monad)
+
+expr :: Expr a -> Build a
+expr (Expr f) = f
+
+unsafeToExpr :: Build a -> Expr a
+unsafeToExpr = Expr

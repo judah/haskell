@@ -12,7 +12,9 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -23,6 +25,8 @@ module TensorFlow.BuildOp
     , eqLengthGuard
     , BuildResult
     , IsResult(..)
+    , ExprResult
+    , exprResult
     )
   where
 
@@ -120,9 +124,13 @@ runResult ns o =
 
 -- | Make a new "stateful" op, which will not be deduped with otherwise
 -- identical ops.
-buildResult :: OpResult a => [Int64] -> OpDef -> BuildResult a
+buildResult :: OpResult a => [Int64] -> Build OpDef -> BuildResult a
 buildResult ns = liftResult $ \o ->
         runResult ns . Op . NodeName . (^. name) <$> addNewOp o
+
+exprResult :: OpResult a => [Int64] -> Expr OpDef -> ExprResult a
+exprResult ns = liftResult $ \o ->
+        runResult ns . Op . NodeName . (^. name) <$> unsafeToExpr (addNewOp o)
 
 -- | Returns true if all the integers in each tuple are identical.
 -- Throws an error with a descriptive message if not.
@@ -136,17 +144,26 @@ eqLengthGuard = all eachOk
                " contains tensors with different length " ++ show pairs)
 
 
-class IsResult f where
-    type ResultType f
-    liftResult :: (OpDef -> Build (ResultType f)) -> OpDef -> f
+type family ResultType f where
+    ResultType (Build a) = a
+    ResultType (Expr a) = a
+    ResultType ((OpDef -> OpDef) -> f) = ResultType f
 
-instance IsResult (Build a) where
-    type ResultType (Build a) = a
-    liftResult = id
+class Monad m => IsResult m f where
+    liftResult :: (OpDef -> m (ResultType f)) -> m OpDef -> f
 
-instance IsResult f => IsResult ((OpDef -> OpDef) -> f) where
-    type ResultType ((OpDef -> OpDef) -> f) = ResultType f
-    liftResult f o g = liftResult f (g o)
+instance IsResult Build (Build a) where
+    liftResult f m = m >>= f
+
+instance IsResult m f => IsResult m ((OpDef -> OpDef) -> f) where
+    liftResult f o g = liftResult f (g <$> o)
 
 -- TODO: better naming
-type BuildResult a = forall f . (IsResult f, a ~ ResultType f) => f
+type BuildResult a = forall f . (IsResult Build f, a ~ ResultType f) => f
+type ExprResult a = forall f . (IsResult Expr f, a ~ ResultType f) => f
+
+instance IsResult Expr (Build a) where
+    liftResult f o = expr $ o >>= f
+
+instance IsResult Expr (Expr a) where
+    liftResult f m = m >>= f

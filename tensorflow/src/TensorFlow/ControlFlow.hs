@@ -53,11 +53,11 @@ withControlDependencies deps act = withNodeDependencies (nodes deps) act
 -- no output.
 group :: Nodes t => t -> Build ControlNode
 group deps = buildResult []
-                $ opDef "NoOp" & opControlInputs .~ Set.toList (nodes deps)
+                $ pure $ opDef "NoOp" & opControlInputs .~ Set.toList (nodes deps)
 
 
 -- | Returns a 'Tensor' with the same shape and contents as the input.
-identity :: TensorType a => Tensor v a -> Build (Tensor v a)
+identity :: TensorType a => Expr (Tensor v a) -> Expr (Tensor v a)
 identity = namedIdentity implicitName
 
 -- | Returns a 'Tensor' with a given name and the same shape and contents as
@@ -66,23 +66,23 @@ identity = namedIdentity implicitName
 -- TODO(judahjacobson): This breaks when used with uninitialize @Tensor Ref@s,
 -- since @RefIdentity@ doesn't have SetAllowsUninitializedInput().  Look into
 -- whether we can change that op.
-named :: TensorType a => Text -> Tensor v a -> Build (Tensor v a)
+named :: TensorType a => Text -> Expr (Tensor v a) -> Expr (Tensor v a)
 named = namedIdentity . explicitName
 
 -- | An internal version of "identity" that allows setting the name
 -- of the output Tensor.
 namedIdentity :: forall a v . TensorType a
-              => PendingNodeName -> Tensor v a -> Build (Tensor v a)
-namedIdentity n t =
-    case t ^. tensorKind of
-        ValueKind -> buildResult [] (opDefWithName n "Identity"
+              => PendingNodeName -> Expr (Tensor v a) -> Expr (Tensor v a)
+namedIdentity n t = do
+    t' <- t
+    let setAttr = (opAttr "T" .~ tensorType (undefined :: a))
+                . (opInputs .~ [t' ^. tensorOutput])
+    case t' ^. tensorKind of
+        ValueKind -> exprResult [] $ pure (opDefWithName n "Identity"
                                         & setAttr)
-        RefKind -> buildResult [] (opDefWithName n "RefIdentity" & setAttr)
-  where
-    setAttr = (opAttr "T" .~ tensorType (undefined :: a))
-                . (opInputs .~ [t ^. tensorOutput])
+        RefKind -> exprResult [] $ pure (opDefWithName n "RefIdentity" & setAttr)
 
 
 -- | Does nothing.  Only useful as a placeholder for control edges.
 noOp :: Build ControlNode
-noOp = buildResult [] $ opDef "NoOp"
+noOp = buildResult [] $ pure $ opDef "NoOp"
