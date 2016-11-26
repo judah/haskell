@@ -12,11 +12,14 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TypeFamilies #-}
 
 module TensorFlow.BuildOp
     ( OpResult
@@ -33,7 +36,7 @@ module TensorFlow.BuildOp
 
 import Control.Monad (replicateM)
 import Control.Monad.Reader (ReaderT(..), runReaderT, ask)
-import Control.Monad.State.Strict (State, runState, get, put)
+import Control.Monad.State.Strict (State, evalState, runState, get, put)
 import Control.Monad.Trans (lift)
 import Data.Int (Int64)
 import Lens.Family2 ((&), (<>~), (^.))
@@ -187,3 +190,121 @@ instance IsResult Expr Expr where
 f &>> g = runReaderT f g
 
 infixl 1 &>>
+
+----------------------
+
+class MakeExprOp a where
+    makeExprOp :: ReaderT OpDef (State ResultState) a
+
+class LiftToBuild a where
+    type Unlifted a
+    liftToBuild :: Unlifted a -> Build a
+
+instance (MakeExprOp a1, MakeExprOp a2) => MakeExprOp (a1, a2) where
+    makeExprOp = (,) <$> makeExprOp <*> makeExprOp
+
+instance (LiftToBuild a, LiftToBuild b) => LiftToBuild (a, b) where
+    type Unlifted (a,b) = (Unlifted a, Unlifted b)
+    liftToBuild (x,y) = (,) <$> liftToBuild x <*> liftToBuild y
+
+{-
+instance (MakeExprOp a1, MakeExprOp a2, MakeExprOp a3) => MakeExprOp (a1, a2, a3) where
+    makeExprOp = (,,) <$> makeExprOp <*> makeExprOp <*> makeExprOp
+
+instance (MakeExprOp a1, MakeExprOp a2, MakeExprOp a3, MakeExprOp a4)
+         => MakeExprOp (a1, a2, a3, a4) where
+    makeExprOp = (,,,) <$> makeExprOp <*> makeExprOp <*> makeExprOp <*> makeExprOp
+
+instance (MakeExprOp a1, MakeExprOp a2, MakeExprOp a3, MakeExprOp a4, MakeExprOp a5)
+         => MakeExprOp (a1, a2, a3, a4, a5) where
+    makeExprOp = (,,,,) <$> makeExprOp
+                      <*> makeExprOp
+                      <*> makeExprOp
+                      <*> makeExprOp
+                      <*> makeExprOp
+
+instance ( MakeExprOp a1
+         , MakeExprOp a2
+         , MakeExprOp a3
+         , MakeExprOp a4
+         , MakeExprOp a5
+         , MakeExprOp a6
+         )
+         => MakeExprOp (a1, a2, a3, a4, a5, a6) where
+    makeExprOp = (,,,,,)
+               <$> makeExprOp
+               <*> makeExprOp
+               <*> makeExprOp
+               <*> makeExprOp
+               <*> makeExprOp
+               <*> makeExprOp
+-}
+
+instance MakeExprOp a => MakeExprOp [a] where
+    makeExprOp = do
+        ResultState i ns <- get
+        case ns of
+            [] -> error $ "Ran out of counts in toResult. " ++
+                          "Likely misuse of buildListOp."
+            (n : rest) -> do
+                put $! ResultState i rest
+                replicateM (fromIntegral n) makeExprOp
+
+instance LiftToBuild a => LiftToBuild [a] where
+    type Unlifted [a] = [Unlifted a]
+    liftToBuild = mapM liftToBuild
+
+instance LiftToBuild (Tensor Value a) where
+    type Unlifted (Tensor Value a) = Expr (Tensor Value a)
+    liftToBuild = expr
+    
+
+instance MakeExprOp (Expr (Tensor Value a)) where
+    makeExprOp = do
+        ResultState i ns <- get
+        put $! ResultState i ns
+        o <- ask
+        return $ Tensor ValueKind . output i . Op <$> unsafeToExpr (getOrAddOp o)
+
+class ExprOpResult f where
+    type ExprOpResultType f
+    type ExprOpResultType f = f
+    liftExprOpResult :: (OpDef -> ExprOpResultType f) -> OpDef -> f
+    default liftExprOpResult :: ExprOpResultType f ~ f => (OpDef -> f) -> OpDef -> f
+    liftExprOpResult = id
+
+instance ExprOpResult (Expr a) where
+instance ExprOpResult (a,b) where
+instance ExprOpResult (a,b,c) where
+instance ExprOpResult (a,b,c,d) where
+instance ExprOpResult [a]
+
+instance ExprOpResult f => ExprOpResult ((OpDef -> OpDef) -> f) where
+    type ExprOpResultType ((OpDef -> OpDef) -> f) = ExprOpResultType f
+    liftExprOpResult f o g = liftExprOpResult f (g o)
+
+instance (LiftToBuild a, ExprOpResult (Unlifted a),
+            ExprOpResultType (Unlifted a) ~ Unlifted a)
+    => ExprOpResult (Build a) where
+    type ExprOpResultType (Build a) = Unlifted a
+    liftExprOpResult f = liftToBuild . f
+
+-- TODO: what about [Int64] that depend on a non-mandatory attr?
+-- Is there such a thing?
+exprOp :: (ExprOpResult f, MakeExprOp (ExprOpResultType f)) => [Int64] -> OpDef -> f
+exprOp sizes
+    = liftExprOpResult $ \o -> flip evalState (ResultState 0 sizes)
+                                    $ runReaderT makeExprOp o
+
+type ExprOp a = forall f . (ExprOpResult f, ExprOpResultType f ~ a) => f 
+
+foo :: Int64 -> ExprOp [Expr (Tensor Value a)]
+foo n = exprOp [n] $ opDef "hi"
+
+bar :: Build [Tensor Value a]
+bar = foo 3
+
+baz :: Expr (Tensor Value a)
+baz = head $ foo 5
+
+-- Can we lift ExprOp into Build?

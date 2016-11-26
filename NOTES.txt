@@ -25,3 +25,29 @@ OK, just need to figure out a good API...
 
 Yes, this makes more sense than before.  It makes a stronger case for
 Expr vs Build.
+
+What if you're stateful?
+
+====
+Unfortunately, the variadic is not great since there's no monad anymore...
+
+===
+
+BUT what about use in different name/device scopes?
+Not sure.  Let's see how annoying it is in practice.
+
+do
+    v <- variable []    
+    w <- variable []
+    let (x,y) = someOpReturningAPair
+    withNameScope "foo" $ assign v x
+    withNameScope "bar" $ assign w x
+    
+
+yeah, that's not great.  Not sure what to do.
+Maybe: CSE across name scopes?
+And leave devices for now?
+Or: go the reverse?  And say you're on your own when you try to do
+this?
+
+Also: you basically just shouldn't an Expr directly.
