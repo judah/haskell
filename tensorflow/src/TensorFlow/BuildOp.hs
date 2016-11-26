@@ -122,6 +122,8 @@ runResult ns o =
         (_, ns') -> error $ "Ununsed length in runResult attributes: " ++
                             show (ns, ns')
 
+-- TODO: better for these to just take OpDef.  (Similarly for the IsResult class.)
+
 -- | Make a new "stateful" op, which will not be deduped with otherwise
 -- identical ops.
 buildResult :: OpResult a => [Int64] -> Build OpDef -> BuildResult a
