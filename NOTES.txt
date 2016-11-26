@@ -1,0 +1,27 @@
+Is Expr too restrictive?
+Should we allow "Op" which is a wrapper around the thing?
+
+Specifically, for lists and tuples: it's safe to decompose them as long as you
+don't try to set the name or whatever.
+
+Op [Expr (Tensor a)]
+
+
+No, what we really want is one of the following:
+
+[Expr t]
+(OpDef -> OpDef) -> [Expr t]
+etc.
+
+ACTUALLY, this is kinda nice for tuples too!
+
+(Expr t1, Expr t2)
+
+:)
+
+Of course, this means that every op is rendered for every list element.
+But we can use observable sharing to get around that.
+OK, just need to figure out a good API...
+
+Yes, this makes more sense than before.  It makes a stronger case for
+Expr vs Build.
