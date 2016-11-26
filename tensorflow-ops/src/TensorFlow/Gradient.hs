@@ -31,6 +31,7 @@ import Data.ByteString (ByteString)
 import Data.Complex (Complex)
 import Data.Default (def)
 import Data.Int (Int32, Int64)
+import Data.Foldable (foldlM)
 import Data.List (foldl', sortBy)
 import Data.Map.Strict (Map)
 import Data.Maybe (fromMaybe, maybeToList, mapMaybe)
@@ -62,6 +63,8 @@ import TensorFlow.Build
     , opAttr
     , opInputs
     , Expr
+    , expr
+    , unsafeToExpr
     )
 import TensorFlow.BuildOp
 import TensorFlow.Ops
@@ -120,7 +123,7 @@ gradients :: forall a v1 v2 . ( Num (Tensor v1 a)
                               )
           => Tensor v1 a  -- ^ The output of the graph.
           -> [Tensor v2 a]  -- ^ Tensors for which gradients are computed.
-          -> Build [Tensor Value a]
+          -> Expr [Tensor Value a]
 gradients y xs = do
     -- The gradients are computed using "reverse accumulation", similarly to
     -- what is described here:
@@ -150,26 +153,28 @@ gradients y xs = do
 
     let yName = y ^. tensorOutput . outputOp . to unOp 
     -- TODO(fmayle): Move this into Build.hs and call it unsafeNodeDefFromName?
-    nodeDefLookup :: (NodeName -> NodeDef) <- uses renderedNodeDefs $
+    nodeDefLookup :: (NodeName -> NodeDef) <- unsafeToExpr $ uses renderedNodeDefs $
         (\f x -> fromMaybe (error $ "no NodeDef found for " ++ show x) (f x))
         . flip Map.lookup
     let (gr, nodeMap) = createGraph yName nodeDefLookup
     -- Set gradient of y to one.
-    let initPending :: Map.Map FGL.Node (PendingGradients a)
-        initPending = Map.empty & at (nodeMap Map.! yName)
+    let initPending :: Expr (Map.Map FGL.Node (PendingGradients a))
+        initPending = do
+            f <- fill (shape $ pure y) 1
+            pure $ Map.empty & at (nodeMap Map.! yName)
                                 . nonEmpty
                                 . outputIxAt (y ^. tensorOutput . outputIndex)
                                 . nonEmpty
-                                .~ [fill (shape y) (scalar 1)]
+                                .~ [f]
     -- Calculate the gradients of y w.r.t. each node in the graph.
-    gradientMap <- graphGrads gr initPending
+    gradientMap <- initPending >>= graphGrads gr
     -- Lookup the gradients for each x.
     forM xs $ \x -> do
         let xName = x ^. tensorOutput . outputOp . to unOp
-        return $ fromMaybe (zerosLike x) $ do
+        fromMaybe (zerosLike $ pure x) $ do
             n <- nodeMap ^. at xName
             let i = x ^. tensorOutput . outputIndex
-            gradientMap ^. at n . nonEmpty . outputIxAt i
+            pure <$> gradientMap ^. at n . nonEmpty . outputIxAt i
 
 outputIxAt :: OutputIx -> Lens' (IntMap.IntMap v) (Maybe v)
 outputIxAt = intAt . unOutputIx
@@ -232,37 +237,36 @@ graphGrads :: forall a. GradientCompatible a
            => Graph
            -> Map FGL.Node (PendingGradients a)
            -- ^ Initial gradients (usually just 1 for the node of interest).
-           -> Build (Map FGL.Node (Gradients a))
-graphGrads gr initPending = pure (foldl' go initState nodeOrder ^. gradientsResult)
+           -> Expr (Map FGL.Node (Gradients a))
+-- TODO: foldlM'
+graphGrads gr initPending = fmap (^. gradientsResult) (foldlM go initState nodeOrder)
   where
     initState = GradientsState initPending Map.empty
     -- Reverse topological sort.
     -- TODO(fmayle): Filter out nodes that are not successors of any x in xs to
     -- avoid calculating gradients that won't be used.
     nodeOrder = FGL.topsort $ FGL.grev gr
-    go state node =
+    go state node = do
         -- Aggregate the accumulated gradients for this node.
-        let outputGrads =
+        outputGrads <- 
                 sumPendingGradient (state ^. gradientsPending . at node . nonEmpty)
-        in if null outputGrads
-           then state
-           else
-              -- Calculate the gradients for each of the node's inputs.
-              let nextState = state & gradientsResult %~ Map.insert node outputGrads
-                  ctx = FGL.context gr node
-              in updatePendingGradients
-                 ctx
-                 (calculateInputGrads ctx outputGrads gr)
-                 nextState
+        if null outputGrads
+           then pure state
+           else do
+                -- Calculate the gradients for each of the node's inputs.
+                let nextState = state & gradientsResult %~ Map.insert node outputGrads
+                let ctx = FGL.context gr node
+                gs <- calculateInputGrads ctx outputGrads gr
+                pure $ updatePendingGradients ctx gs nextState
 
 -- | Reduce accumulated gradients for each output to one Tensor.
 sumPendingGradient :: GradientCompatible a
-                   => PendingGradients a -> Gradients a
-sumPendingGradient = IntMap.mapMaybe f
+                   => PendingGradients a -> Expr (Gradients a)
+sumPendingGradient = fmap (IntMap.mapMaybe id) . traverse f
   where
-    f [] = Nothing
-    f [x] = Just x
-    f xs = Just (addN xs)
+    f [] = pure Nothing
+    f [x] = pure $ Just x
+    f xs = Just <$> addN (pure xs)
 
 
 -- | Calculate the gradients of a node's input tensors.
@@ -272,7 +276,7 @@ calculateInputGrads :: forall a. GradientCompatible a
                     => FGL.Context NodeDef EdgeLabel
                     -> Gradients a  -- ^ Output gradients of the node.
                     -> Graph
-                    -> [Maybe (Tensor Value a)]
+                    -> Expr [Maybe (Tensor Value a)]
 calculateInputGrads (inputEdges, _, nodeDef, _) outputGrads gr =
     opGrad (nodeDef ^. op) nodeDef inputTensors fullOutGrads
   where
@@ -294,9 +298,9 @@ fullOutputGrads :: (TensorType a, Num a)
                 => OutputIx  -- ^ Number of outputs.
                 -> Op
                 -> Gradients a
-                -> [Tensor Value a]
+                -> [Expr (Tensor Value a)]
 fullOutputGrads n o gs =
-    map (\i -> fromMaybe (zero i) (gs ^. outputIxAt i)) [0..n-1]
+    map (\i -> fromMaybe (zero i) (fmap pure $ gs ^. outputIxAt i)) [0..n-1]
   where
     -- A tensor of zeros with the same shape as the i'th output.
     zero i = zerosLike $ toT (Output i o)
