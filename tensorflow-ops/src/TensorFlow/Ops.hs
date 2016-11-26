@@ -177,19 +177,19 @@ zeroInitializedVariable = initializedVariable . zeros
 -- TODO: Support heterogeneous list of tensors.
 save :: forall a v . TensorType a
         => ByteString     -- ^ File path.
-        -> [Expr (Tensor v a)]  -- ^ Tensors to save.
-        -> BuildResult ControlNode
-save path xs = buildResult [] $ do
-    xs' <- expr $ sequence xs
-    let f = (\t -> scalar $ encodeUtf8 $ renderOutput $ t ^. tensorOutput)
-                :: Tensor v a -> Expr (Tensor Value ByteString)
-    let names = map f xs' :: [Expr (Tensor Value ByteString)]
-    let types = replicate (length xs) (tensorType (undefined :: a))
-    p <- expr $ scalar path
-    n <- expr $ CoreOps.pack names
-    return $ opDef "Save"
-                            & opAttr "T" .~ types
-                            & opInputs .~ ([p ^. tensorOutput, n ^. tensorOutput]
+        -> Expr [Tensor v a]  -- ^ Tensors to save.
+        -> Build ControlNode
+save path xs = 
+    expr xs >>= \xs' -> let
+        f = (\t -> scalar $ encodeUtf8 $ renderOutput $ t ^. tensorOutput)
+                    :: Tensor v a -> Expr (Tensor Value ByteString)
+        names = mapM f xs' :: Expr [Tensor Value ByteString]
+        types = replicate (length xs') (tensorType (undefined :: a))
+        in scalar path >>= \p ->
+            (CoreOps.pack names :: Build (Tensor Value ByteString)) >>=| \n ->
+            buildResult [] $ opDef "Save"
+                                    & opAttr "T" .~ types
+                                & opInputs .~ ([p ^. tensorOutput, n ^. tensorOutput]
                                             ++ map (^. tensorOutput) xs')
 
 -- | Restore a tensor's value from a checkpoint file.
@@ -275,7 +275,7 @@ reducedShape inputShape axes =
         axesMod = (axes32 + inputRank) `CoreOps.mod` inputRank
         axesShape = shape axesMod                 -- [2]
     in CoreOps.dynamicStitch                      -- [2, 1, 1, 7]
-         [CoreOps.range 0 inputRank 1,            -- [0, 1, 2, 3]
-           axesMod]                               -- [1, 2]
-         [inputShape32,                           -- [2, 3, 5, 7]
-           CoreOps.fill axesShape 1]              -- [1, 1]
+         (sequence [CoreOps.range 0 inputRank 1,            -- [0, 1, 2, 3]
+           axesMod])                               -- [1, 2]
+         (sequence [inputShape32,                           -- [2, 3, 5, 7]
+           CoreOps.fill axesShape 1])              -- [1, 1]

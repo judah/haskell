@@ -161,6 +161,9 @@ instance IsResult Build (Build a) where
     liftResult = id
     (>>=|) = (>>=)
 
+infixl 1 >>=|
+-- TODO: make this better so it can be used in TensorFlow.Ops.save
+
 instance IsResult m f => IsResult m ((OpDef -> OpDef) -> f) where
     liftResult f o g = liftResult f (g o)
     m >>=| f = \g -> m >>=| flip f g
