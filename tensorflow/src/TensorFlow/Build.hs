@@ -363,3 +363,7 @@ expr (Expr f) = f
 
 unsafeToExpr :: Build a -> Expr a
 unsafeToExpr = Expr
+
+-- TODO: Allow 'withDevice', 'colocateWith', scoping in Expr?
+-- Not sure since the purity might make things more confusing.
+-- But if so, maybe make Build parameterized on Pure/Stateful?

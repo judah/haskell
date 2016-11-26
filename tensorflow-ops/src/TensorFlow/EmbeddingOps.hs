@@ -25,11 +25,13 @@ module TensorFlow.EmbeddingOps where
 
 import Control.Monad (zipWithM)
 import Data.Int (Int32, Int64)
-import TensorFlow.Build (Build, colocateWith)
+import TensorFlow.Build (Expr, Build, colocateWith)
 import TensorFlow.Ops (shape, scalar, vector)  -- Also Num instance for Tensor
 import TensorFlow.Tensor (Tensor, Value)
 import TensorFlow.Types (OneOf, TensorType)
 import qualified TensorFlow.GenOps.Core as CoreOps
+
+-- TODO: take Expr as input?
 
 -- | Looks up `ids` in a list of embedding tensors.
 --
@@ -54,34 +56,33 @@ embeddingLookup :: forall a b v .
                 -- ^ A list of tensors which can be concatenated along
                 -- dimension 0. Each `Tensor` must be appropriately
                 -- sized for `mod` partition strategy.
-                -> Tensor Value b
+                -> Expr (Tensor Value b)
                 -- ^ A `Tensor` with type `int32` or `int64`
                 -- containing the ids to be looked up in `params`.
                 -- The ids are required to have fewer than 2^31
                 -- entries.
                 -> Build (Tensor Value a)
                 -- ^ A dense tensor with shape `shape(ids) + shape(params)[1:]`.
-embeddingLookup [p0] ids = colocateWith p0 (CoreOps.gather (pure p0) (pure ids))
+embeddingLookup [p0] ids = colocateWith p0 (CoreOps.gather (pure p0) ids)
 -- TODO: use Expr here?
 embeddingLookup params@(p0 : _) ids = do
     -- Do np separate lookups, finding embeddings for plist[p] in params[p]
     gids <- gatherIds
     partitionedResult <- zipWithM
-                        (\p g -> colocateWith p $ CoreOps.gather (pure p) g)
-                        params (map pure gids)
-    iis <- pindices
-    let unshapedResult = CoreOps.dynamicStitch (map pure iis) (map pure partitionedResult)
+                        (\p g -> colocateWith p $ CoreOps.gather (pure p) (pure g))
+                        params gids
+    let unshapedResult = CoreOps.dynamicStitch pindices (pure partitionedResult)
     -- Shape restoration is not as optimal as it would be with client
     -- side shape tracking.
     paramShape <- colocateWith p0 (shape (pure p0))
-    let finalShape = CoreOps.concat 0 [shape (pure ids), tailShape]
+    let finalShape = CoreOps.concat 0 $ sequence [shape ids, tailShape]
         tailShape = CoreOps.slice (pure paramShape) (singleton 1) (singleton (-1))
     CoreOps.reshape unshapedResult finalShape
   where
     -- Avoids genericLength here which would be evaluated by TF.
     np :: Num a => a
     np = fromIntegral (length params)
-    flatIds = CoreOps.reshape (pure ids) (singleton (-1))
+    flatIds = CoreOps.reshape ids (singleton (-1))
     pAssignments = CoreOps.cast (flatIds `CoreOps.mod` np)
     newIds = flatIds `CoreOps.div` np
     originalIndices = CoreOps.range 0 (CoreOps.size flatIds) 1
