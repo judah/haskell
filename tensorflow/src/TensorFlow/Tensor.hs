@@ -52,11 +52,6 @@ tensorKind = lens (\(Tensor v _) -> v) (\(Tensor _ o) v -> Tensor v o)
 tensorOutput :: Lens' (Tensor v a) Output
 tensorOutput = lens (\(Tensor _ o) -> o) (\(Tensor v _) o -> Tensor v o)
 
--- | Cast a 'Tensor *' into a 'Tensor Value'. Common usage is to cast a
--- Ref into Value. This behaves like a no-op.
-value :: Tensor v a -> Tensor Value a
-value (Tensor _ o) = Tensor ValueKind o
-
 -- | A pair of a 'Tensor' and some data that should be fed into that 'Tensor'
 -- when running the graph.
 data Feed = Feed Output FFI.TensorData
@@ -74,3 +69,6 @@ feed (Tensor _ o) (TensorData td) = Feed o td
 -- TODO(judahjacobson): add more safety checks here.
 tensorFromName :: TensorKind v -> Text.Text -> Tensor v a
 tensorFromName v = Tensor v . fromString . Text.unpack
+
+
+

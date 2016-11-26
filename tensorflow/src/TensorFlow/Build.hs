@@ -12,10 +12,13 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+{-# LANGUAGE DefaultSignatures #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE Rank2Types #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeFamilies #-}
 module TensorFlow.Build
     ( -- * Graph node types
       ControlNode(..)
@@ -43,10 +46,12 @@ module TensorFlow.Build
     , addGraphDef
     , flushInitializers
     , flushNodeBuffer
-    -- * The Expr monad
-    , Expr
-    , expr
-    , unsafeToExpr
+    -- * TensorExpr
+    , TensorExpr(..)
+    , Expr(..)
+    , IsExprOp(..)
+    , ExprOp(..)
+    , value
     -- * Creating and looking up Ops
     , getOrAddOp
     , addNewOp
@@ -355,17 +360,59 @@ addSummary t = summaries %= (t :)
 collectAllSummaries :: Monad m => BuildT m [SummaryTensor]
 collectAllSummaries = use summaries
 
-newtype Expr a = Expr (Build a)
-    deriving (Functor, Applicative, Monad)
+newtype TensorExpr a = TensorExpr {exprOutput :: Build Output}
 
--- TODO: maybe MonadOp Exr m => Expr a -> m a
--- since in practice we have (build $ expr f) in a few tests.
-expr :: Expr a -> Build a
-expr (Expr f) = f
+class Expr a where
+    type ExprType a
+    expr :: ExprType a -> Build a
 
-unsafeToExpr :: Build a -> Expr a
-unsafeToExpr = Expr
+instance v ~ Value => Expr (Tensor v a) where
+    type ExprType (Tensor v a) = TensorExpr a
+    expr (TensorExpr t) = Tensor ValueKind <$> t
 
--- TODO: Allow 'withDevice', 'colocateWith', scoping in Expr?
--- Not sure since the purity might make things more confusing.
--- But if so, maybe make Build parameterized on Pure/Stateful?
+instance (Expr a1, Expr a2) => Expr (a1, a2) where
+    type ExprType (a1,a2) = (ExprType a1, ExprType a2)
+    expr (x1,x2) = (,) <$> expr x1 <*> expr x2
+
+instance (Expr a1, Expr a2, Expr a3) => Expr (a1, a2, a3) where
+    type ExprType (a1,a2,a3) = (ExprType a1, ExprType a2, ExprType a3)
+    expr (x1,x2,x3) = (,,) <$> expr x1
+                                 <*> expr x2
+                                 <*> expr x3
+
+instance (Expr a1, Expr a2, Expr a3, Expr a4) => Expr (a1, a2, a3, a4) where
+    type ExprType (a1,a2,a3,a4) = (ExprType a1, ExprType a2, ExprType a3, ExprType a4)
+    expr (x1,x2,x3,x4) = (,,,) <$> expr x1
+                                 <*> expr x2
+                                 <*> expr x3
+                                 <*> expr x4
+
+instance Expr a => Expr [a] where
+    type ExprType [a] = [ExprType a]
+    expr = mapM expr
+
+class IsExprOp f where
+    type ExprOpType f
+    type ExprOpType f = f
+    liftExprOp :: (Build OpDef -> ExprOpType f) -> Build OpDef -> f
+    default liftExprOp :: ExprOpType f ~ f => (Build OpDef -> f) -> Build OpDef -> f
+    liftExprOp = id
+
+instance IsExprOp (TensorExpr a) where
+instance IsExprOp (a,b)
+instance IsExprOp (a,b,c)
+instance IsExprOp (a,b,c,d)
+instance IsExprOp [a]
+
+instance IsExprOp f => IsExprOp ((OpDef -> OpDef) -> f) where
+    type ExprOpType ((OpDef -> OpDef) -> f) = ExprOpType f
+    liftExprOp f o g = liftExprOp f (g <$> o)
+
+type ExprOp a = forall f . (IsExprOp f, ExprOpType f ~ a) => f
+
+-- | Cast a 'Tensor *' into a 'Tensor Value'. Common usage is to cast a
+-- Ref into Value. This behaves like a no-op.
+value :: Tensor v a -> TensorExpr a
+value (Tensor _ o) = TensorExpr $ return o
+
+

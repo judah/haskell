@@ -138,9 +138,6 @@ instance MonadOp Session where
 instance IsResult Build Session where
     liftResult = build
 
-instance IsResult Expr Session where
-    liftResult = build . expr
-
 -- | Lift a 'Build' action into a 'Session', including any explicit op
 -- renderings. Returns the merged summary ops which can be used for
 -- logging, see 'TensorFlow.Logging.build' for a convenient wrapper.

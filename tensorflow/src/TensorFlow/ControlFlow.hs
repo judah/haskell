@@ -58,7 +58,7 @@ group deps = buildResult []
 
 
 -- | Returns a 'Tensor' with the same shape and contents as the input.
-identity :: TensorType a => Expr (Tensor v a) -> Expr (Tensor v a)
+identity :: TensorType a => Tensor v a -> ExprOp (TensorExpr a)
 identity = namedIdentity implicitName
 
 -- TODO: replace this with just "opName".
@@ -68,22 +68,21 @@ identity = namedIdentity implicitName
 -- TODO(judahjacobson): This breaks when used with uninitialize @Tensor Ref@s,
 -- since @RefIdentity@ doesn't have SetAllowsUninitializedInput().  Look into
 -- whether we can change that op.
-named :: TensorType a => Text -> Expr (Tensor v a) -> ExprResult (Tensor v a)
+named :: TensorType a => Text -> Tensor v a -> ExprOp (TensorExpr a)
 named = namedIdentity . explicitName
 
 -- | An internal version of "identity" that allows setting the name
 -- of the output Tensor.
 namedIdentity :: forall a v . TensorType a
-              => PendingNodeName -> Expr (Tensor v a) -> ExprResult (Tensor v a)
-namedIdentity n t = do
-    t' <- liftResult t
+              => PendingNodeName -> Tensor v a -> ExprOp (TensorExpr a)
+namedIdentity n t = exprOp [] $ pure $
     let setAttr = (opAttr "T" .~ tensorType (undefined :: a))
-                . (opInputs .~ [t' ^. tensorOutput])
-    case t' ^. tensorKind of
-        ValueKind -> exprResult [] (opDefWithName n "Identity")
-                        &>> setAttr
-        RefKind -> exprResult [] (opDefWithName n "RefIdentity")
-                        &>> setAttr
+                . (opInputs .~ [t ^. tensorOutput])
+    in case t ^. tensorKind of
+        ValueKind -> opDefWithName n "Identity"
+                        & setAttr
+        RefKind -> opDefWithName n "RefIdentity"
+                        & setAttr
 
 
 -- | Does nothing.  Only useful as a placeholder for control edges.
