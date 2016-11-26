@@ -137,7 +137,7 @@ exprResult :: OpResult a => [Int64] -> OpDef -> ExprResult a
 exprResult ns o = do
     modifier <- askOpModifier
     liftResult $
-        runResult ns . Op . NodeName . (^. name) <$> unsafeToExpr (addNewOp $ modifier o)
+        runResult ns . Op <$> unsafeToExpr (getOrAddOp $ modifier o)
 
 -- | Returns true if all the integers in each tuple are identical.
 -- Throws an error with a descriptive message if not.
