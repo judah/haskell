@@ -408,6 +408,10 @@ instance IsExprOp f => IsExprOp ((OpDef -> OpDef) -> f) where
     type ExprOpType ((OpDef -> OpDef) -> f) = ExprOpType f
     liftExprOp f o g = liftExprOp f (g <$> o)
 
+instance Expr a => IsExprOp (Build a) where
+    type ExprOpType (Build a) = ExprType a
+    liftExprOp f  = expr . f
+
 type ExprOp a = forall f . (IsExprOp f, ExprOpType f ~ a) => f
 
 -- | Cast a 'Tensor *' into a 'Tensor Value'. Common usage is to cast a
