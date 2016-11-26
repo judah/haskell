@@ -126,11 +126,11 @@ runResult ns o =
 
 -- | Make a new "stateful" op, which will not be deduped with otherwise
 -- identical ops.
-buildResult :: OpResult a => [Int64] -> Build OpDef -> BuildResult a
+buildResult :: OpResult a => [Int64] -> OpDef -> BuildResult a
 buildResult ns = liftResult $ \o ->
         runResult ns . Op . NodeName . (^. name) <$> addNewOp o
 
-exprResult :: OpResult a => [Int64] -> Expr OpDef -> ExprResult a
+exprResult :: OpResult a => [Int64] -> OpDef -> ExprResult a
 exprResult ns = liftResult $ \o ->
         runResult ns . Op . NodeName . (^. name) <$> unsafeToExpr (addNewOp o)
 
@@ -152,20 +152,27 @@ type family ResultType f where
     ResultType ((OpDef -> OpDef) -> f) = ResultType f
 
 class Monad m => IsResult m f where
-    liftResult :: (OpDef -> m (ResultType f)) -> m OpDef -> f
+    liftResult :: (OpDef -> m (ResultType f)) -> OpDef -> f
+    -- TODO: is this deducible from liftResult?  Or something more
+    -- fundamental?
+    (>>=|) :: m a -> (a -> f) -> f
 
 instance IsResult Build (Build a) where
-    liftResult f m = m >>= f
+    liftResult = id
+    (>>=|) = (>>=)
 
 instance IsResult m f => IsResult m ((OpDef -> OpDef) -> f) where
-    liftResult f o g = liftResult f (g <$> o)
+    liftResult f o g = liftResult f (g o)
+    m >>=| f = \g -> m >>=| flip f g
 
 -- TODO: better naming
 type BuildResult a = forall f . (IsResult Build f, a ~ ResultType f) => f
 type ExprResult a = forall f . (IsResult Expr f, a ~ ResultType f) => f
 
 instance IsResult Expr (Build a) where
-    liftResult f o = expr $ o >>= f
+    liftResult f o = expr $ f o
+    m >>=| f = expr m >>= f
 
 instance IsResult Expr (Expr a) where
-    liftResult f m = m >>= f
+    liftResult = id
+    (>>=|) = (>>=)

@@ -54,7 +54,7 @@ withControlDependencies deps act = withNodeDependencies (nodes deps) act
 -- no output.
 group :: Nodes t => t -> BuildResult ControlNode
 group deps = buildResult []
-                $ pure $ opDef "NoOp" & opControlInputs .~ Set.toList (nodes deps)
+                $ opDef "NoOp" & opControlInputs .~ Set.toList (nodes deps)
 
 
 -- | Returns a 'Tensor' with the same shape and contents as the input.
@@ -79,11 +79,11 @@ namedIdentity n t = do
     let setAttr = (opAttr "T" .~ tensorType (undefined :: a))
                 . (opInputs .~ [t' ^. tensorOutput])
     case t' ^. tensorKind of
-        ValueKind -> exprResult [] $ pure (opDefWithName n "Identity"
+        ValueKind -> exprResult [] (opDefWithName n "Identity"
                                         & setAttr)
-        RefKind -> exprResult [] $ pure (opDefWithName n "RefIdentity" & setAttr)
+        RefKind -> exprResult [] (opDefWithName n "RefIdentity" & setAttr)
 
 
 -- | Does nothing.  Only useful as a placeholder for control edges.
 noOp :: Build ControlNode
-noOp = buildResult [] $ pure $ opDef "NoOp"
+noOp = buildResult [] $ opDef "NoOp"

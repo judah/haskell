@@ -178,19 +178,20 @@ renderOp pOp = stack $
                 <+> "=" </>  -- args are indented
                     -- the body needs to be indented wrt the name
                     indent indentation (functionBody pOp)
-    ] ++ whereClause listSizeAttrs
+    ]
   where
     n = renderHaskellName $ parsedOpName pOp
     listSizeAttrs = inferredListSizeAttrs pOp
-    args = sep $ map renderHaskellName
-               $ map attrName (explicitInputAttrs pOp)
-                ++ map parsedArgName (parsedInputs pOp)
+    args = sep $ map (renderHaskellName . attrName) (explicitInputAttrs pOp)
+                ++ map monadicVarName (parsedInputs pOp)
     haddocks = "-- |" <+> multilineComment (parsedOpSummary pOp) (parsedOpDescription pOp)
 
 -- | A check that all lists of the given size have the given length.
 -- For example:
 --   eqLengthGuard [("N", [("input1", length input1), ("input2", length input2)])]
 funcGuard :: [Attr (NonEmpty Name)] -> Doc
+funcGuard _ = "True"
+-- TODO:
 funcGuard attrs = "eqLengthGuard" <+> brackets (commasep entries)
       where
         entries =
@@ -203,27 +204,14 @@ funcGuard attrs = "eqLengthGuard" <+> brackets (commasep entries)
         renderTensorName x = parens $ renderQuotedTFName x <> comma <+>
                         "length" <+> renderHaskellName x
 
--- | Define the implicit list length attributes.
--- For example:
---   where
---     n1 = fromIntegral (length input1) :: Int64
---     n2 = fromIntegral (length input2) :: Int64
-whereClause :: [Attr (NonEmpty Name)] -> [Doc]
-whereClause [] = []
-whereClause as = [indent 2 $ "where" </> indent 2 (stack $ map defineLengthAttr as)]
-  where
-    defineLengthAttr a = renderHaskellName (attrName a) <+> "="
-                            <+> "fromIntegral (length"
-                            <+> renderHaskellName (NE.head $ attrInfo a)
-                            <> ") :: Int64"
-
 functionBody :: ParsedOp -> Doc
 functionBody pOp =
-    (if parsedOpIsStateful pOp then "buildResult" else "exprResult")
+    bindInputs pOp (parsedInputs pOp)
+    <+> bindListSizes (inferredListSizeAttrs pOp)
+    <+> (if parsedOpIsStateful pOp then "buildResult" else "exprResult")
          <+> brackets (commasep $
                                     map renderHaskellName outputListsSizes)
-        <+> "$" <+> bindInputs pOp (parsedInputs pOp)
-                <+> "pure" <+> parens (hang 0 (stack buildOpParts))
+        <+> parens (hang 0 (stack buildOpParts))
   where
     outputListsSizes = [ a
                        | ParsedArg { parsedArgCase = ListArg { argLength = a } }
@@ -253,30 +241,45 @@ isExprInput p = case parsedArgKind p of
     ArgTensorEither _ -> True
     _ -> False
 
-boundVar :: Doc -> Doc
-boundVar t = t <> "'"
+monadicVarName :: ParsedArg -> Doc
+monadicVarName t
+    | isExprInput t = renderHaskellName (parsedArgName t) <> "'"
+    | otherwise = renderHaskellName (parsedArgName t)
 
+-- TODO: generate a "do" block instead.
 bindInputs o [] = ""
 bindInputs o (t : ts)
-    | isExprInput t = sequenced liftedN <+> ">>= \\" <> boundVar n <+> "->" <+> bindInputs o ts
+    | isExprInput t = liftedN <+> ">>=| \\" <> n <+> "->" <+> bindInputs o ts
     | otherwise = bindInputs o ts
   where
     n = renderHaskellName $ parsedArgName t
     liftedN
-        | parsedOpIsStateful o = "expr" <+> n
-        | otherwise = n
+        | parsedOpIsStateful o = "expr" <+> monadicVarName t
+        | otherwise = monadicVarName t
     sequenced x
         | ListArg{} <- parsedArgCase t = "sequenceA" <+> x
         | otherwise = x
 
+bindListSizes [] = ""
+bindListSizes (a : as) = "let" <+> listAssignment a <+> "in" <+> bindListSizes as
+
+-- | Define the implicit list length attributes.
+-- For example:
+--     n1 = fromIntegral (length input1) :: Int64
+listAssignment :: Attr (NonEmpty Name) -> Doc
+listAssignment a = renderHaskellName (attrName a) <+> "="
+                            <+> "fromIntegral (length"
+                            <+> renderHaskellName (NE.head $ attrInfo a)
+                            <> ") :: Int64"
+
+
 inputsList :: [ParsedArg] -> Doc
 inputsList [] = "[]"
 inputsList (t:ts) = case parsedArgCase t of
-    SimpleArg{} -> outputSelector <+> n' <+> ":" <+> inputsList ts
-    ListArg{} -> "map" <+> outputSelector <+> n' <+> "++" <+> inputsList ts
+    SimpleArg{} -> outputSelector <+> n <+> ":" <+> inputsList ts
+    ListArg{} -> "map" <+> outputSelector <+> n <+> "++" <+> inputsList ts
   where
     n = renderHaskellName $ parsedArgName t
-    n' = if isExprInput t then boundVar n else n
     outputSelector = case parsedArgKind t of
                         -- TODO: clean this up
                         ArgResource -> "(\\(ResourceHandle h) -> h)"
@@ -325,12 +328,12 @@ typeSig pOp = constraints
         AttrShape -> "Shape"
         AttrTensor -> "TensorProto"
 
-    tensorArgAndComment t = tensorArg (wrapInput t) t <+> hang 0 ("-- ^" <+> argComment t)
+    tensorArgAndComment t = wrapInput t (tensorArg t) <+> hang 0 ("-- ^" <+> argComment t)
     outputs = case parsedOutputs pOp of
         [] -> wrapBuild "ControlNode"
         -- TODO(judahjacobson): To improve indentation: `tensorArgAndComment a`
-        [a] -> wrapBuild (tensorArg id a) <+> "-- ^" <+> argComment a
-        as -> wrapBuild (tuple (map (tensorArg id) as)) <+/> resultComment as
+        [a] -> wrapBuild (tensorArg a) <+> "-- ^" <+> argComment a
+        as -> wrapBuild (tuple (map tensorArg as)) <+/> resultComment as
     wrapBuild o
         | parsedOpIsStateful pOp = "BuildResult" <+> parens o
         | otherwise = "ExprResult" <+> parens o
@@ -340,10 +343,10 @@ typeSig pOp = constraints
 
 -- | Render an op input or output.
 -- For example: "Tensor Ref Int64", "Tensor v t", "ResourceHandle dtype"
-tensorArg :: (Doc -> Doc) -> ParsedArg -> Doc
-tensorArg wrapExpr p = case parsedArgCase p of
-    SimpleArg { argType = t } -> wrapExpr $ tensorType t
-    ListArg { argType = t } -> brackets $ wrapExpr $ tensorType t
+tensorArg :: ParsedArg -> Doc
+tensorArg p = case parsedArgCase p of
+    SimpleArg { argType = t } -> tensorType t
+    ListArg { argType = t } -> brackets $ tensorType t
     MixedListArg {} -> "{{{tensorArg: can't handle heterogeneous lists}}}"
   where
     tensorType t = let
