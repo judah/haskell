@@ -24,6 +24,7 @@ module TensorFlow.BuildOp
     , eqLengthGuard
     , BuildResult
     , IsResult(..)
+    , MonadOp(..)
     , ExprResult
     , exprResult
     , (&>>)
@@ -153,8 +154,8 @@ eqLengthGuard = all eachOk
 class Monad m => MonadOp m where
     askOpModifier :: m (OpDef -> OpDef)
 
-instance Monad m => MonadOp (ReaderT (OpDef -> OpDef) m) where
-    askOpModifier = ask
+instance MonadOp m => MonadOp (ReaderT (OpDef -> OpDef) m) where
+    askOpModifier = (.) <$> ask <*> lift askOpModifier
 
 instance MonadOp Build where
     askOpModifier = pure id

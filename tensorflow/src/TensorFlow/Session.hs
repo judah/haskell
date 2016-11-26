@@ -12,11 +12,14 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Rank2Types #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TypeSynonymInstances #-}
 
 module TensorFlow.Session (
     Session,
@@ -54,6 +57,7 @@ import Lens.Family2.Unchecked (lens)
 import Proto.Tensorflow.Core.Framework.Graph (node)
 import Proto.Tensorflow.Core.Protobuf.Config (ConfigProto)
 import TensorFlow.Build
+import TensorFlow.BuildOp (MonadOp(..), IsResult(..))
 import TensorFlow.Nodes
 import TensorFlow.Output (NodeName, unNodeName, renderOutput)
 import TensorFlow.Tensor
@@ -127,6 +131,15 @@ runSessionWithOptions options (Session m) =
 -- renderings.
 build :: Build a -> Session a
 build = Session . lift . hoistBuildT (return . runIdentity)
+
+instance MonadOp Session where
+    askOpModifier = pure id
+
+instance IsResult Build Session where
+    liftResult = build
+
+instance IsResult Expr Session where
+    liftResult = build . expr
 
 -- | Lift a 'Build' action into a 'Session', including any explicit op
 -- renderings. Returns the merged summary ops which can be used for

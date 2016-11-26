@@ -23,6 +23,7 @@ import Test.Framework.Providers.HUnit (testCase)
 import Test.HUnit ((@=?))
 import qualified Data.Vector as V
 
+import qualified TensorFlow.Build as TF
 import qualified TensorFlow.Ops as TF
 import qualified TensorFlow.Session as TF
 import qualified TensorFlow.Tensor as TF
@@ -32,10 +33,10 @@ import qualified TensorFlow.GenOps.Core as CoreOps
 -- | Test split and concat are inverses.
 testSplit :: Test
 testSplit = testCase "testSplit" $ TF.runSession $ do
-    let original = TF.constant [2, 3] [0..5 :: Float]
-        splitList = CoreOps.split 3 dim original
-        restored = CoreOps.concat dim splitList
-        dim = 1  -- dimension to split along (with size of 3 in original)
+    original <- TF.constant [2, 3] [0..5 :: Float]
+    let dim = 1  -- dimension to split along (with size of 3 in original)
+    splitList <- CoreOps.split 3 dim (pure original)
+    restored <- CoreOps.concat dim (pure splitList)
     liftIO $ 3 @=? length splitList
     (x, y, z) <- TF.run (original, restored, splitList !! 1)
     liftIO $ x @=? (y :: V.Vector Float)
@@ -44,8 +45,8 @@ testSplit = testCase "testSplit" $ TF.runSession $ do
 testShapeN :: Test
 testShapeN = testCase "testShapeN" $ TF.runSession $ do
     let shapes = map TF.Shape [[1],[2,3]]
-    let tensors = map TF.zeros shapes :: [TF.Tensor TF.Value Float]
-    result <- TF.run $ CoreOps.shapeN tensors
+    let tensors = map TF.zeros shapes :: [TF.Expr (TF.Tensor TF.Value Float)]
+    result <- CoreOps.shapeN (sequence tensors) >>= TF.run
     liftIO $ [V.fromList [1], V.fromList [2,3]] @=? (result :: [V.Vector Int64])
 
 main :: IO ()

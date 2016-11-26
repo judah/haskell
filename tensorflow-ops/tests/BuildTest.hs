@@ -15,6 +15,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE OverloadedLists #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections #-}
 
 module Main where
 
@@ -36,13 +37,14 @@ import TensorFlow.Build
     , evalBuildT
     , flushNodeBuffer
     , hoistBuildT
-    , render
     , withDevice
     , colocateWith
     , withNameScope
+    , expr
     )
 import TensorFlow.ControlFlow (named)
 import TensorFlow.Nodes (unScalar)
+import TensorFlow.BuildOp (liftResult)
 import TensorFlow.Ops
     ( add
     , assign
@@ -68,7 +70,7 @@ import qualified Data.Vector as V
 -- | Test named behavior.
 testNamed :: Test
 testNamed = testCase "testNamed" $ do
-    let graph = named "foo" <$> variable [] >>= render :: Build (Tensor Ref Float)
+    let graph = variable [] >>= named "foo" . pure :: Build (Tensor Ref Float)
         nodeDef :: NodeDef
         nodeDef = head $ asGraphDef graph ^. node
     "RefIdentity" @=? (nodeDef ^. op)
@@ -77,9 +79,9 @@ testNamed = testCase "testNamed" $ do
 -- | Test named deRef behavior.
 testNamedDeRef :: Test
 testNamedDeRef = testCase "testNamedDeRef" $ do
-    let graph = named "foo" <$> do
+    let graph = do
                     v :: Tensor Ref Float <- variable []
-                    assign v 5
+                    assign v 5 >>= named "foo" . pure
     -- TODO: Implement TensorFlow get_variable and test it.
     runSession $ do
       out <- buildAnd run graph
@@ -89,7 +91,7 @@ testNamedDeRef = testCase "testNamedDeRef" $ do
 -- been rendered.
 testPureRender :: Test
 testPureRender = testCase "testPureRender" $ runSession $ do
-    result <- run $ 2 `add` 2
+    result <- build (expr (2 `add` 2)) >>= run
     liftIO $ 4 @=? (unScalar result :: Float)
 
 -- | Test that "run" assigns any previously accumulated initializers.
@@ -99,7 +101,7 @@ testInitializedVariable =
         (formula, reset) <- build $ do
             v <- initializedVariable 42
             r <- assign v 24
-            return (1 `add` v, r)
+            fmap (,r) (1 `add` pure v)
         result <- run formula
         liftIO $ 43 @=? (unScalar result :: Float)
         run_ reset  -- Updates v to a different value
@@ -126,7 +128,7 @@ testNameScoped = testCase "testNameScoped" $ do
 testNamedAndScoped :: Test
 testNamedAndScoped = testCase "testNamedAndScoped" $ do
     let graph :: Build (Tensor Ref Float)
-        graph = withNameScope "foo1" ((named "bar1" <$> variable []) >>= render)
+        graph = withNameScope "foo1" (variable [] >>= named "bar1" . pure)
         nodeDef :: NodeDef
         nodeDef = head $ asGraphDef graph ^. node
     "RefIdentity" @=? (nodeDef ^. op)
@@ -155,11 +157,11 @@ testRenderDedup = testCase "testRenderDedup" $ evalBuildT $ do
     renderNodes = do
         -- A stateful op and a pure op.
         _ :: Tensor Ref Float <- variable []
-        _ :: Tensor Value Float <- render 3
+        _ :: Tensor Value Float <- expr 3
         -- Another stateful op, and a pure op which should be
         -- deduped with the previous one.
         _ :: Tensor Ref Float <- variable []
-        _ :: Tensor Value Float <- render 3
+        _ :: Tensor Value Float <- expr 3
         return ()
 
 -- | Test the interaction of rendering, CSE and scoping.
@@ -175,7 +177,7 @@ testDeviceColocation = testCase "testDeviceColocation" $ evalBuildT $ do
         -- A stateful op and a pure op.
         var :: Tensor Ref Float <- withDevice (Just $ Device "dev0") $ variable []
         -- Uses render to cause the expression be added to the graph.
-        _ <- colocateWith var $ render $ 3 `add` var
+        _ <- colocateWith var $ 3 `add` pure var
         return ()
 
 main :: IO ()
