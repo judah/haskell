@@ -163,7 +163,7 @@ initializedVariable :: forall a . TensorType a
 initializedVariable initializer = do
     v <- CoreOps.variable []  -- The shape is not known initially.
     (i :: Tensor Ref a) <-
-        CoreOps.assign v initializer (opAttr "validate_shape" .~ False)
+        CoreOps.assign v initializer &>> opAttr "validate_shape" .~ False
     addInitializer =<< group i
     return v
 
@@ -178,16 +178,16 @@ zeroInitializedVariable = initializedVariable . zeros
 save :: forall a v . TensorType a
         => ByteString     -- ^ File path.
         -> Expr [Tensor v a]  -- ^ Tensors to save.
-        -> Build ControlNode
-save path xs = 
-    expr xs >>= \xs' -> let
-        f = (\t -> scalar $ encodeUtf8 $ renderOutput $ t ^. tensorOutput)
+        -> BuildResult ControlNode
+save path xs = do
+    xs' <- liftResult $ expr xs
+    let f = (\t -> scalar $ encodeUtf8 $ renderOutput $ t ^. tensorOutput)
                     :: Tensor v a -> Expr (Tensor Value ByteString)
-        names = mapM f xs' :: Expr [Tensor Value ByteString]
-        types = replicate (length xs') (tensorType (undefined :: a))
-        in scalar path >>= \p ->
-            (CoreOps.pack names :: Build (Tensor Value ByteString)) >>=| \n ->
-            buildResult [] $ opDef "Save"
+    let names = mapM f xs' :: Expr [Tensor Value ByteString]
+    let types = replicate (length xs') (tensorType (undefined :: a))
+    p <- liftResult (expr $ scalar path)
+    n :: Tensor Value ByteString <- liftResult (expr $ CoreOps.pack names)
+    buildResult [] $ opDef "Save"
                                     & opAttr "T" .~ types
                                 & opInputs .~ ([p ^. tensorOutput, n ^. tensorOutput]
                                             ++ map (^. tensorOutput) xs')
@@ -224,7 +224,7 @@ restore path x = do
 constant :: forall a . TensorType a => Shape -> [a] -> ExprResult (Tensor Value a)
 constant (Shape shape') values
     | invalidLength = error invalidLengthMsg
-    | otherwise = CoreOps.const (opAttr "value" .~ typedNode)
+    | otherwise = CoreOps.const &>> opAttr "value" .~ typedNode
   where
     invalidLength = product shape' /= fromIntegral (length values)
     invalidLengthMsg = printf "invalid tensor length: expected %d got %d"

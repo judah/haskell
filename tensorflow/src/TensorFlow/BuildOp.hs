@@ -17,7 +17,6 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TupleSections #-}
-{-# LANGUAGE TypeFamilies #-}
 
 module TensorFlow.BuildOp
     ( OpResult
@@ -27,12 +26,14 @@ module TensorFlow.BuildOp
     , IsResult(..)
     , ExprResult
     , exprResult
+    , (&>>)
     )
   where
 
 import Control.Monad (replicateM)
-import Control.Monad.Reader (ReaderT, runReaderT, ask)
+import Control.Monad.Reader (ReaderT(..), runReaderT, ask)
 import Control.Monad.State.Strict (State, runState, get, put)
+import Control.Monad.Trans (lift)
 import Data.Int (Int64)
 import Lens.Family2 ((&), (<>~), (^.))
 
@@ -127,12 +128,16 @@ runResult ns o =
 -- | Make a new "stateful" op, which will not be deduped with otherwise
 -- identical ops.
 buildResult :: OpResult a => [Int64] -> OpDef -> BuildResult a
-buildResult ns = liftResult $ \o ->
-        runResult ns . Op . NodeName . (^. name) <$> addNewOp o
+buildResult ns o = do
+    modifier <- askOpModifier
+    liftResult $
+        runResult ns . Op . NodeName . (^. name) <$> addNewOp (modifier o)
 
 exprResult :: OpResult a => [Int64] -> OpDef -> ExprResult a
-exprResult ns = liftResult $ \o ->
-        runResult ns . Op . NodeName . (^. name) <$> unsafeToExpr (addNewOp o)
+exprResult ns o = do
+    modifier <- askOpModifier
+    liftResult $
+        runResult ns . Op . NodeName . (^. name) <$> unsafeToExpr (addNewOp $ modifier o)
 
 -- | Returns true if all the integers in each tuple are identical.
 -- Throws an error with a descriptive message if not.
@@ -145,37 +150,39 @@ eqLengthGuard = all eachOk
         error ("number_attr " ++ numberAttrName ++
                " contains tensors with different length " ++ show pairs)
 
+class Monad m => MonadOp m where
+    askOpModifier :: m (OpDef -> OpDef)
 
-type family ResultType f where
-    ResultType (Build a) = a
-    ResultType (Expr a) = a
-    ResultType ((OpDef -> OpDef) -> f) = ResultType f
+instance Monad m => MonadOp (ReaderT (OpDef -> OpDef) m) where
+    askOpModifier = ask
 
-class Monad m => IsResult m f where
-    liftResult :: (OpDef -> m (ResultType f)) -> OpDef -> f
-    -- TODO: is this deducible from liftResult?  Or something more
-    -- fundamental?
-    (>>=|) :: m a -> (a -> f) -> f
+instance MonadOp Build where
+    askOpModifier = pure id
 
-instance IsResult Build (Build a) where
+instance MonadOp Expr where
+    askOpModifier = pure id
+
+class (Monad m, MonadOp f) => IsResult m f where
+    liftResult :: m a -> f a
+
+instance IsResult Build Build where
     liftResult = id
-    (>>=|) = (>>=)
 
-infixl 1 >>=|
--- TODO: make this better so it can be used in TensorFlow.Ops.save
-
-instance IsResult m f => IsResult m ((OpDef -> OpDef) -> f) where
-    liftResult f o g = liftResult f (g o)
-    m >>=| f = \g -> m >>=| flip f g
+instance IsResult m f => IsResult m (ReaderT (OpDef -> OpDef) f) where
+    liftResult = lift . liftResult
 
 -- TODO: better naming
-type BuildResult a = forall f . (IsResult Build f, a ~ ResultType f) => f
-type ExprResult a = forall f . (IsResult Expr f, a ~ ResultType f) => f
+type BuildResult a = forall f . (IsResult Build f) => f a
+type ExprResult a = forall f . (IsResult Expr f) => f a
 
-instance IsResult Expr (Build a) where
-    liftResult f o = expr $ f o
-    m >>=| f = expr m >>= f
+instance IsResult Expr Build where
+    liftResult = expr
 
-instance IsResult Expr (Expr a) where
+instance IsResult Expr Expr where
     liftResult = id
-    (>>=|) = (>>=)
+
+-- TODO: better name for this op
+(&>>) :: Monad m => ReaderT (OpDef -> OpDef) m a -> (OpDef -> OpDef) -> m a
+f &>> g = runReaderT f g
+
+infixl 1 &>>

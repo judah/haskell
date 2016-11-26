@@ -537,17 +537,17 @@ opGrad "MatMul" nodeDef [toT -> x, toT -> y] [dz] =
             (opAttr "transpose_a" .~ a) . (opAttr "transpose_b" .~ b)
     in grads $ case (transposeA, transposeB) of
        (False, False) ->
-           [ Just $ (dz `matMul` y) (transAttrs False True)
-           , Just $ (x `matMul` dz) (transAttrs True False) ]
+           [ Just $ (dz `matMul` y) &>> transAttrs False True
+           , Just $ (x `matMul` dz) &>> transAttrs True False ]
        (False, True) ->
            [ Just $ dz `matMul` y
-           , Just $ (x `matMul` dz) (transAttrs True False) ]
+           , Just $ (x `matMul` dz) &>> transAttrs True False ]
        (True, False) ->
-           [ Just $ (dz `matMul` y) (transAttrs False True)
+           [ Just $ (dz `matMul` y) &>> transAttrs False True
            , Just $ x `matMul` dz ]
        (True, True) ->
-           [ Just $ (dz `matMul` y) (transAttrs True True)
-           , Just $ (x `matMul` dz) (transAttrs True True) ]
+           [ Just $ (dz `matMul` y) &>> transAttrs True True
+           , Just $ (x `matMul` dz) &>> transAttrs True True ]
 
 opGrad "Transpose" _ [_, toT -> p] [dz] =
     grads [ Just $ CoreOps.transpose dz
@@ -557,15 +557,15 @@ opGrad "Transpose" _ [_, toT -> p] [dz] =
 
 opGrad "Conv2D" nodeDef [toT -> x, toT -> y] [dz] =
     grads [ Just $ CoreOps.conv2DBackpropInput (shape x) y dz
-          ( opAttr "strides" .~ strides)
-          ( opAttr "padding" .~ padding)
-          ( opAttr "use_cudnn_on_gpu" .~ useCudnnOnGpu)
-          ( opAttr "data_format" .~ dataFormat)
+          &>> opAttr "strides" .~ strides
+          &>> opAttr "padding" .~ padding
+          &>> opAttr "use_cudnn_on_gpu" .~ useCudnnOnGpu
+          &>> opAttr "data_format" .~ dataFormat
     , Just $ CoreOps.conv2DBackpropFilter x (shape y) dz
-          ( opAttr "strides" .~ strides)
-          ( opAttr "padding" .~ padding)
-          ( opAttr "use_cudnn_on_gpu" .~ useCudnnOnGpu)
-          ( opAttr "data_format" .~ dataFormat)
+          &>> opAttr "strides" .~ strides
+          &>> opAttr "padding" .~ padding
+          &>> opAttr "use_cudnn_on_gpu" .~ useCudnnOnGpu
+          &>> opAttr "data_format" .~ dataFormat
     ]
   where
     strides = lookupAttr nodeDef "strides" :: [Int64]
@@ -575,10 +575,10 @@ opGrad "Conv2D" nodeDef [toT -> x, toT -> y] [dz] =
 
 opGrad "MaxPool" nodeDef [toT -> x] [dz] =
     grads [ Just $ CoreOps.maxPoolGrad x output dz
-          (opAttr "ksize" .~ ksize)
-          ( opAttr "strides" .~ strides)
-          ( opAttr "padding" .~ padding)
-          ( opAttr "data_format" .~ dataFormat)
+          &>> opAttr "ksize" .~ ksize
+          &>> opAttr "strides" .~ strides
+          &>> opAttr "padding" .~ padding
+          &>> opAttr "data_format" .~ dataFormat
     ]
   where
     output :: Expr (Tensor Value a)

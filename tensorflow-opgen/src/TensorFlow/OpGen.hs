@@ -249,12 +249,12 @@ monadicVarName t
 -- TODO: generate a "do" block instead.
 bindInputs o [] = ""
 bindInputs o (t : ts)
-    | isExprInput t = liftedN <+> ">>=| \\" <> n <+> "->" <+> bindInputs o ts
+    | isExprInput t = "liftResult" <+> liftedN <+> ">>= \\" <> n <+> "->" <+> bindInputs o ts
     | otherwise = bindInputs o ts
   where
     n = renderHaskellName $ parsedArgName t
     liftedN
-        | parsedOpIsStateful o = "expr" <+> monadicVarName t
+        | parsedOpIsStateful o = parens $ "expr" <+> monadicVarName t
         | otherwise = monadicVarName t
     sequenced x
         | ListArg{} <- parsedArgCase t = "sequenceA" <+> x
