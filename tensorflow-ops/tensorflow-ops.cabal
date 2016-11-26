@@ -135,6 +135,7 @@ Test-Suite DataFlowOpsTest
                , test-framework
                , test-framework-hunit
                , test-framework-quickcheck2
+               , transformers
                , vector
 
 Test-Suite GradientTest

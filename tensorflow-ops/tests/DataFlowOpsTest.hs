@@ -14,6 +14,7 @@
 
 {-# LANGUAGE ScopedTypeVariables #-}
 
+import Control.Monad.IO.Class (liftIO)
 import Data.Int (Int32, Int64)
 import Data.List (genericLength)
 import Google.Test (googleTest)
@@ -28,13 +29,14 @@ import qualified TensorFlow.Ops as TF
 import qualified TensorFlow.Session as TF
 import qualified TensorFlow.Tensor as TF
 import qualified TensorFlow.Types as TF
+import qualified TensorFlow.Build as TF
 
 -- DynamicSplit is undone with DynamicStitch to get the original input
 -- back.
 testDynamicPartitionStitchInverse :: forall a.
     (TF.TensorType a, Show a, Eq a) => StitchExample a -> Property
 testDynamicPartitionStitchInverse (StitchExample numParts values partitions) =
-   let splitParts :: [TF.Tensor TF.Value a] =
+   let splitParts :: TF.Expr [TF.Tensor TF.Value a] =
            CoreOps.dynamicPartition numParts (TF.vector values) partTensor
        partTensor = TF.vector partitions
        restitchIndices = CoreOps.dynamicPartition numParts
@@ -42,10 +44,11 @@ testDynamicPartitionStitchInverse (StitchExample numParts values partitions) =
                              partTensor
        -- drop (numParts - 2) from both args to expose b/27343984
        restitch = CoreOps.dynamicStitch restitchIndices splitParts
-    in monadicIO $ run $ do
-       fromIntegral numParts @=? length splitParts
-       valuesOut <- TF.runSession $ TF.buildAnd TF.run $ return restitch
-       V.fromList values @=? valuesOut
+    in monadicIO $ run $ TF.runSession $ do
+       sp <- TF.build $ TF.expr splitParts
+       liftIO $ fromIntegral numParts @=? length sp
+       valuesOut <- TF.buildAnd TF.run restitch
+       liftIO $ V.fromList values @=? valuesOut
 
 data StitchExample a = StitchExample Int64 [a] [Int32]
     deriving Show

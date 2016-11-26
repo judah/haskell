@@ -358,6 +358,8 @@ collectAllSummaries = use summaries
 newtype Expr a = Expr (Build a)
     deriving (Functor, Applicative, Monad)
 
+-- TODO: maybe MonadOp Exr m => Expr a -> m a
+-- since in practice we have (build $ expr f) in a few tests.
 expr :: Expr a -> Build a
 expr (Expr f) = f
 
