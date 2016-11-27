@@ -51,7 +51,7 @@ module TensorFlow.Build
     , Expr(..)
     , IsExprOp(..)
     , ExprOp(..)
-    , value
+    , expr
     -- * Creating and looking up Ops
     , getOrAddOp
     , addNewOp
@@ -362,34 +362,37 @@ collectAllSummaries = use summaries
 
 newtype TensorExpr a = TensorExpr {exprOutput :: Build Output}
 
+expr :: Tensor v a -> TensorExpr a
+expr (Tensor _ o) = TensorExpr $ return o
+
 class Expr a where
     type ExprType a
-    expr :: ExprType a -> Build a
+    buildExpr :: ExprType a -> Build a
 
 instance v ~ Value => Expr (Tensor v a) where
     type ExprType (Tensor v a) = TensorExpr a
-    expr (TensorExpr t) = Tensor ValueKind <$> t
+    buildExpr (TensorExpr t) = Tensor ValueKind <$> t
 
 instance (Expr a1, Expr a2) => Expr (a1, a2) where
     type ExprType (a1,a2) = (ExprType a1, ExprType a2)
-    expr (x1,x2) = (,) <$> expr x1 <*> expr x2
+    buildExpr (x1,x2) = (,) <$> buildExpr x1 <*> buildExpr x2
 
 instance (Expr a1, Expr a2, Expr a3) => Expr (a1, a2, a3) where
     type ExprType (a1,a2,a3) = (ExprType a1, ExprType a2, ExprType a3)
-    expr (x1,x2,x3) = (,,) <$> expr x1
-                                 <*> expr x2
-                                 <*> expr x3
+    buildExpr (x1,x2,x3) = (,,) <$> buildExpr x1
+                                 <*> buildExpr x2
+                                 <*> buildExpr x3
 
 instance (Expr a1, Expr a2, Expr a3, Expr a4) => Expr (a1, a2, a3, a4) where
     type ExprType (a1,a2,a3,a4) = (ExprType a1, ExprType a2, ExprType a3, ExprType a4)
-    expr (x1,x2,x3,x4) = (,,,) <$> expr x1
-                                 <*> expr x2
-                                 <*> expr x3
-                                 <*> expr x4
+    buildExpr (x1,x2,x3,x4) = (,,,) <$> buildExpr x1
+                                 <*> buildExpr x2
+                                 <*> buildExpr x3
+                                 <*> buildExpr x4
 
 instance Expr a => Expr [a] where
     type ExprType [a] = [ExprType a]
-    expr = mapM expr
+    buildExpr = mapM buildExpr
 
 class IsExprOp f where
     type ExprOpType f
@@ -410,13 +413,7 @@ instance IsExprOp f => IsExprOp ((OpDef -> OpDef) -> f) where
 
 instance Expr a => IsExprOp (Build a) where
     type ExprOpType (Build a) = ExprType a
-    liftExprOp f  = expr . f
+    liftExprOp f  = buildExpr . f
 
 type ExprOp a = forall f . (IsExprOp f, ExprOpType f ~ a) => f
-
--- | Cast a 'Tensor *' into a 'Tensor Value'. Common usage is to cast a
--- Ref into Value. This behaves like a no-op.
-value :: Tensor v a -> TensorExpr a
-value (Tensor _ o) = TensorExpr $ return o
-
 

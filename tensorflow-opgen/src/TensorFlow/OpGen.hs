@@ -50,7 +50,7 @@ module TensorFlow.OpGen
   where
 
 import Data.Foldable (toList)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 import Data.ProtoLens (def, showMessage)
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
@@ -182,8 +182,9 @@ renderOp pOp = stack $
   where
     n = renderHaskellName $ parsedOpName pOp
     listSizeAttrs = inferredListSizeAttrs pOp
-    args = sep $ map (renderHaskellName . attrName) (explicitInputAttrs pOp)
-                ++ map monadicVarName (parsedInputs pOp)
+    args = sep $ map renderHaskellName
+                $ map attrName (explicitInputAttrs pOp)
+                ++ map parsedArgName (parsedInputs pOp)
     haddocks = "-- |" <+> multilineComment (parsedOpSummary pOp) (parsedOpDescription pOp)
 
 -- | A check that all lists of the given size have the given length.
@@ -205,13 +206,17 @@ funcGuard attrs = "eqLengthGuard" <+> brackets (commasep entries)
                         "length" <+> renderHaskellName x
 
 functionBody :: ParsedOp -> Doc
-functionBody pOp =
-    bindInputs pOp (parsedInputs pOp)
-    <+> bindListSizes (inferredListSizeAttrs pOp)
+functionBody pOp
+    -- TODO: merge these two cases
+    | parsedOpIsStateful pOp =
+    bindListSizes (inferredListSizeAttrs pOp)
     <+> (if parsedOpIsStateful pOp then "buildResult" else "exprResult")
          <+> brackets (commasep $
                                     map renderHaskellName outputListsSizes)
         <+> parens (hang 0 (stack buildOpParts))
+    | otherwise = exprOpBindings pOp (brackets (commasep $ map renderHaskellName outputListsSizes))
+            $
+            "pure" <+> parens (hang 0 (stack buildOpParts))
   where
     outputListsSizes = [ a
                        | ParsedArg { parsedArgCase = ListArg { argLength = a } }
@@ -233,7 +238,7 @@ functionBody pOp =
         ]
         ++ if null (parsedInputs pOp)
             then []
-            else ["& opInputs .~ " <+> inputsList (parsedInputs pOp)]
+            else ["& opInputs .~ " <+> inputsList pOp (parsedInputs pOp)]
 
 isExprInput :: ParsedArg -> Bool
 isExprInput p = case parsedArgKind p of
@@ -260,6 +265,21 @@ bindInputs o (t : ts)
         | ListArg{} <- parsedArgCase t = "sequenceA" <+> x
         | otherwise = x
 
+exprOpBindings :: ParsedOp -> Doc -> Doc -> Doc
+exprOpBindings pOp sizes e
+    = "let" <+> indent 2 (stack $ map listAssignment (inferredListSizeAttrs pOp))
+      </> "in exprOp" <+> sizes <+> "$ do"
+        <+> indent 2 (stack $ mapMaybe bindExprInput (parsedInputs pOp) ++ [e])
+  where
+    bindExprInput t
+        | isExprInput t = Just $ monadicVarName t 
+                                <+> "<-" <+> maybeMapM t <+> "exprOutput"
+                                <+> renderHaskellName (parsedArgName t)
+        | otherwise = Nothing
+    maybeMapM t
+        | ListArg{} <- parsedArgCase t  = "mapM"
+        | otherwise = ""
+                            
 bindListSizes [] = ""
 bindListSizes (a : as) = "let" <+> listAssignment a <+> "in" <+> bindListSizes as
 
@@ -273,17 +293,25 @@ listAssignment a = renderHaskellName (attrName a) <+> "="
                             <> ") :: Int64"
 
 
-inputsList :: [ParsedArg] -> Doc
-inputsList [] = "[]"
-inputsList (t:ts) = case parsedArgCase t of
-    SimpleArg{} -> outputSelector <+> n <+> ":" <+> inputsList ts
-    ListArg{} -> "map" <+> outputSelector <+> n <+> "++" <+> inputsList ts
+inputsList :: ParsedOp -> [ParsedArg] -> Doc
+inputsList o [] = "[]"
+inputsList o (t:ts) = case parsedArgCase t of
+    SimpleArg{}
+        | not (parsedOpIsStateful o) && isExprInput t
+            -> outputSelector <+> n' <+> ":" <+> inputsList o ts
+        | otherwise -> outputSelector <+> n <+> ":" <+> inputsList o ts
+    ListArg{}
+        | not (parsedOpIsStateful o) && isExprInput t -> "map" <+> outputSelector <+> n' <+> "++" <+> inputsList o ts
+        | otherwise -> "map" <+> outputSelector <+> n <+> "++" <+> inputsList o ts
   where
+    n' = monadicVarName t
     n = renderHaskellName $ parsedArgName t
     outputSelector = case parsedArgKind t of
                         -- TODO: clean this up
                         ArgResource -> "(\\(ResourceHandle h) -> h)"
-                        _ -> "(^. tensorOutput)"
+                        _
+                            | parsedOpIsStateful o -> "(^. tensorOutput)"
+                            | otherwise -> "id"
 
 -- | Write a comment with the inputs/outputs/attributes in proto format, for
 -- debugging.
@@ -328,23 +356,20 @@ typeSig pOp = constraints
         AttrShape -> "Shape"
         AttrTensor -> "TensorProto"
 
-    tensorArgAndComment t = wrapInput t (tensorArg t) <+> hang 0 ("-- ^" <+> argComment t)
+    tensorArgAndComment t = tensorArg pOp t <+> hang 0 ("-- ^" <+> argComment t)
     outputs = case parsedOutputs pOp of
         [] -> wrapBuild "ControlNode"
         -- TODO(judahjacobson): To improve indentation: `tensorArgAndComment a`
-        [a] -> wrapBuild (tensorArg a) <+> "-- ^" <+> argComment a
-        as -> wrapBuild (tuple (map tensorArg as)) <+/> resultComment as
+        [a] -> wrapBuild (tensorArg pOp a) <+> "-- ^" <+> argComment a
+        as -> wrapBuild (tuple (map (tensorArg pOp) as)) <+/> resultComment as
     wrapBuild o
         | parsedOpIsStateful pOp = "BuildResult" <+> parens o
-        | otherwise = "ExprResult" <+> parens o
-    wrapInput t
-        | isExprInput t = \o -> "Expr" <+> parens o
-        | otherwise = id
+        | otherwise = "ExprOp" <+> parens o
 
 -- | Render an op input or output.
 -- For example: "Tensor Ref Int64", "Tensor v t", "ResourceHandle dtype"
-tensorArg :: ParsedArg -> Doc
-tensorArg p = case parsedArgCase p of
+tensorArg :: ParsedOp -> ParsedArg -> Doc
+tensorArg pOp p = case parsedArgCase p of
     SimpleArg { argType = t } -> tensorType t
     ListArg { argType = t } -> brackets $ tensorType t
     MixedListArg {} -> "{{{tensorArg: can't handle heterogeneous lists}}}"
@@ -355,8 +380,14 @@ tensorArg p = case parsedArgCase p of
                 ArgTypeAttr n -> renderHaskellName n
         v = case parsedArgKind p of
                 ArgTensorRef -> "Tensor Ref"
-                ArgTensorValue -> "Tensor Value"
-                ArgTensorEither v' -> "Tensor" <+> strictText v'
+                -- TODO: more robust logic around TensorExpr;
+                -- decide in parseOp?
+                ArgTensorValue
+                    | not (parsedOpIsStateful pOp) -> "TensorExpr"
+                    | otherwise -> "Tensor Value"
+                ArgTensorEither v'
+                    | not (parsedOpIsStateful pOp) -> "TensorExpr"
+                    | otherwise -> "Tensor" <+> strictText v'
                 ArgResource -> "ResourceHandle"
         in v <+> a
 

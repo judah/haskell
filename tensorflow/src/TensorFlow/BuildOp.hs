@@ -194,6 +194,21 @@ class MakeExprOp a where
 instance (MakeExprOp a1, MakeExprOp a2) => MakeExprOp (a1, a2) where
     makeExprOp = (,) <$> makeExprOp <*> makeExprOp
 
+instance (MakeExprOp a1, MakeExprOp a2, MakeExprOp a3) => MakeExprOp (a1, a2, a3) where
+    makeExprOp = (,,) <$> makeExprOp <*> makeExprOp <*> makeExprOp
+
+instance (MakeExprOp a1, MakeExprOp a2, MakeExprOp a3, MakeExprOp a4) => MakeExprOp (a1, a2, a3, a4) where
+    makeExprOp = (,,,) <$> makeExprOp <*> makeExprOp <*> makeExprOp <*> makeExprOp
+
+instance (MakeExprOp a1, MakeExprOp a2, MakeExprOp a3, MakeExprOp a4, MakeExprOp a5)
+    => MakeExprOp (a1, a2, a3, a4, a5) where
+    makeExprOp = (,,,,) <$> makeExprOp <*> makeExprOp <*> makeExprOp <*> makeExprOp <*> makeExprOp
+
+instance (MakeExprOp a1, MakeExprOp a2, MakeExprOp a3, MakeExprOp a4, MakeExprOp a5, MakeExprOp a6)
+    => MakeExprOp (a1, a2, a3, a4, a5, a6) where
+    makeExprOp = (,,,,,) <$> makeExprOp <*> makeExprOp <*> makeExprOp <*> makeExprOp <*> makeExprOp
+                            <*> makeExprOp
+
 instance MakeExprOp a => MakeExprOp [a] where
     makeExprOp = do
         ResultState i ns <- get

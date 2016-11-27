@@ -208,6 +208,7 @@ parseOp o = ParsedOp
     , parsedOpSummary = o ^. summary
     , parsedOpDescription = o ^. description
     , parsedOpIsStateful = o ^. isStateful
+                            || null parsedOutputs
                             || any (isRefKind . parsedArgKind) parsedInputs
     , ..
     }

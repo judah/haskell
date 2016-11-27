@@ -70,5 +70,9 @@ feed (Tensor _ o) (TensorData td) = Feed o td
 tensorFromName :: TensorKind v -> Text.Text -> Tensor v a
 tensorFromName v = Tensor v . fromString . Text.unpack
 
+-- | Cast a 'Tensor *' into a 'Tensor Value'. Common usage is to cast a
+-- Ref into Value. This behaves like a no-op.
+value :: Tensor v a -> Tensor Value a
+value (Tensor _ o) = Tensor ValueKind o
 
 

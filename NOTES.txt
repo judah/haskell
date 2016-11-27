@@ -50,4 +50,8 @@ And leave devices for now?
 Or: go the reverse?  And say you're on your own when you try to do
 this?
 
-Also: you basically just shouldn't an Expr directly.
+Also: you basically just shouldn't set scope/device for an Expr directly.
+
+
+
+
