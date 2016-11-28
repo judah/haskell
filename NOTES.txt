@@ -54,4 +54,6 @@ Also: you basically just shouldn't set scope/device for an Expr directly.
 
 
 
+=====
 
+TODO: explicit or implicit render?

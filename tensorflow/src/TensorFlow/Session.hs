@@ -12,6 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -19,7 +20,9 @@
 {-# LANGUAGE Rank2Types #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module TensorFlow.Session (
     Session,
@@ -230,3 +233,9 @@ asyncProdNodes ns = do
     state <- Session ask
     let loop = forever (void (FFI.run (rawSession state) [] [] targetNames))
     liftIO (asyncCollector state loop)
+
+-- TODO: is this a bad idea?
+instance Render a b  => IsExprOp (Session b) a where
+    liftExprOp f  = build . render . f
+
+type instance ExprOpType (Session a) = ExprType a

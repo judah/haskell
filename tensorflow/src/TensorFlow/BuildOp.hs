@@ -222,14 +222,14 @@ instance MakeExprOp a => MakeExprOp [a] where
 instance MakeExprOp (TensorExpr a) where
     makeExprOp = do
         ResultState i ns <- get
-        put $! ResultState i ns
+        put $! ResultState (i+1) ns
         makeOp <- ask
         return $ TensorExpr $ do
             o <- makeOp
             output i . Op <$> getOrAddOp o
 
 -- TODO: the list sizes might also depend on the attrs to come...
-exprOp :: (IsExprOp f, MakeExprOp (ExprOpType f))
+exprOp :: (IsExprOp f a, MakeExprOp a)
     => [Int64] -> Build OpDef -> f
 exprOp sizes = liftExprOp $ \o -> flip evalState (ResultState 0 sizes)
                                     (runReaderT makeExprOp o)

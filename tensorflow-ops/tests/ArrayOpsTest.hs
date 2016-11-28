@@ -13,10 +13,12 @@
 -- limitations under the License.
 
 {-# LANGUAGE OverloadedLists #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 module Main where
 
 import Control.Monad.IO.Class (liftIO)
-import Data.Int (Int64)
+import Data.Int (Int64, Int32)
 import Google.Test (googleTest)
 import Test.Framework (Test)
 import Test.Framework.Providers.HUnit (testCase)
@@ -29,14 +31,29 @@ import qualified TensorFlow.Session as TF
 import qualified TensorFlow.Tensor as TF
 import qualified TensorFlow.Types as TF
 import qualified TensorFlow.GenOps.Core as CoreOps
+import Lens.Family2 ((&), (.~))
+import Data.Default.Class (def)
+import Data.Monoid ((<>))
+
+import System.IO( stderr)
+import Data.ByteString.Builder (hPutBuilder)
+
+-- TODO: ExprType inference isn't great...
 
 -- | Test split and concat are inverses.
 testSplit :: Test
-testSplit = testCase "testSplit" $ TF.runSession $ do
+testSplit = testCase "testSplit" $ TF.runSessionWithOptions
+        (def & TF.sessionTracer .~ (hPutBuilder stderr . (<> "\n"))) $ do
     original <- TF.constant [2, 3] [0..5 :: Float]
+    liftIO $ putStrLn "===ORIGINAL==="
+    TF.run original >>= liftIO . print . V.toList
     let dim = 1  -- dimension to split along (with size of 3 in original)
-    splitList <- CoreOps.split 3 dim (pure original)
-    restored <- CoreOps.concat dim (pure splitList)
+    TF.build (TF.render (dim :: TF.TensorExpr Int32)) >>= TF.run >>= liftIO . print . V.toList
+    splitList <- CoreOps.split 3 dim (TF.expr original)
+    liftIO $ putStrLn "===SplitList==="
+    TF.run splitList >>= liftIO . print . map V.toList
+    liftIO $ putStrLn "===Restored==="
+    restored <- TF.build $ CoreOps.concat dim (map TF.expr splitList)
     liftIO $ 3 @=? length splitList
     (x, y, z) <- TF.run (original, restored, splitList !! 1)
     liftIO $ x @=? (y :: V.Vector Float)
@@ -45,8 +62,8 @@ testSplit = testCase "testSplit" $ TF.runSession $ do
 testShapeN :: Test
 testShapeN = testCase "testShapeN" $ TF.runSession $ do
     let shapes = map TF.Shape [[1],[2,3]]
-    let tensors = map TF.zeros shapes :: [TF.Expr (TF.Tensor TF.Value Float)]
-    result <- CoreOps.shapeN (sequence tensors) >>= TF.run
+    let tensors = map TF.zeros shapes :: [TF.TensorExpr Float]
+    result <- TF.buildAnd TF.run $ CoreOps.shapeN tensors
     liftIO $ [V.fromList [1], V.fromList [2,3]] @=? (result :: [V.Vector Int64])
 
 main :: IO ()

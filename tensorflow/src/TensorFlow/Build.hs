@@ -13,12 +13,15 @@
 -- limitations under the License.
 
 {-# LANGUAGE DefaultSignatures #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE Rank2Types #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UndecidableInstances #-}
 module TensorFlow.Build
     ( -- * Graph node types
       ControlNode(..)
@@ -48,10 +51,14 @@ module TensorFlow.Build
     , flushNodeBuffer
     -- * TensorExpr
     , TensorExpr(..)
-    , Expr(..)
+    , Render(..)
+    , RenderType
+    , ExprType
     , IsExprOp(..)
     , ExprOp(..)
+    , ExprOpType
     , expr
+    , PureOp(..)
     -- * Creating and looking up Ops
     , getOrAddOp
     , addNewOp
@@ -365,55 +372,125 @@ newtype TensorExpr a = TensorExpr {exprOutput :: Build Output}
 expr :: Tensor v a -> TensorExpr a
 expr (Tensor _ o) = TensorExpr $ return o
 
-class Expr a where
-    type ExprType a
-    buildExpr :: ExprType a -> Build a
 
-instance v ~ Value => Expr (Tensor v a) where
-    type ExprType (Tensor v a) = TensorExpr a
-    buildExpr (TensorExpr t) = Tensor ValueKind <$> t
+type family ExprType a where
+    ExprType (Tensor v a) = TensorExpr a
+    ExprType (a,b) = (ExprType a, ExprType b)
+    ExprType (a,b,c) = (ExprType a, ExprType b, ExprType c)
+    ExprType (a,b,c,d) = (ExprType a, ExprType b, ExprType c, ExprType d)
+    ExprType [a] = [ExprType a]
 
-instance (Expr a1, Expr a2) => Expr (a1, a2) where
-    type ExprType (a1,a2) = (ExprType a1, ExprType a2)
-    buildExpr (x1,x2) = (,) <$> buildExpr x1 <*> buildExpr x2
+type family RenderType a where
+    RenderType (TensorExpr a) = Tensor Value a
+    RenderType (a,b) = (RenderType a, RenderType b)
+    RenderType (a,b,c) = (RenderType a, RenderType b, RenderType c)
+    RenderType (a,b,c,d) = (RenderType a, RenderType b, RenderType c, RenderType d)
+    RenderType [a] = [RenderType a]
 
-instance (Expr a1, Expr a2, Expr a3) => Expr (a1, a2, a3) where
-    type ExprType (a1,a2,a3) = (ExprType a1, ExprType a2, ExprType a3)
-    buildExpr (x1,x2,x3) = (,,) <$> buildExpr x1
-                                 <*> buildExpr x2
-                                 <*> buildExpr x3
+-- TODO: don't use fundeps (and then see if UndecidableInstances can be removed)
+class (a ~ ExprType b, b ~ RenderType a) => Render a b where
+    render :: a -> Build b
 
-instance (Expr a1, Expr a2, Expr a3, Expr a4) => Expr (a1, a2, a3, a4) where
-    type ExprType (a1,a2,a3,a4) = (ExprType a1, ExprType a2, ExprType a3, ExprType a4)
-    buildExpr (x1,x2,x3,x4) = (,,,) <$> buildExpr x1
-                                 <*> buildExpr x2
-                                 <*> buildExpr x3
-                                 <*> buildExpr x4
+instance (v ~ Value) => Render (TensorExpr a) (Tensor v a) where
+    render (TensorExpr t) = Tensor ValueKind <$> t
 
-instance Expr a => Expr [a] where
-    type ExprType [a] = [ExprType a]
-    buildExpr = mapM buildExpr
+instance (Render a1 b1, Render a2 b2) => Render (a1, a2) (b1, b2) where
+    render (x1,x2) = (,) <$> render x1 <*> render x2
 
-class IsExprOp f where
-    type ExprOpType f
-    type ExprOpType f = f
-    liftExprOp :: (Build OpDef -> ExprOpType f) -> Build OpDef -> f
-    default liftExprOp :: ExprOpType f ~ f => (Build OpDef -> f) -> Build OpDef -> f
+instance (Render a1 b1, Render a2 b2, Render a3 b3)
+    => Render (a1, a2, a3) (b1, b2, b3) where
+    render (x1,x2,x3) = (,,) <$> render x1
+                                 <*> render x2
+                                 <*> render x3
+
+instance (Render a1 b1, Render a2 b2, Render a3 b3, Render a4 b4)
+    => Render (a1, a2, a3, a4) (b1, b2, b3, b4) where
+    render (x1,x2,x3,x4) = (,,,) <$> render x1
+                                 <*> render x2
+                                 <*> render x3
+                                 <*> render x4
+
+instance Render a b => Render [a] [b] where
+    render = mapM render
+
+type family ExprOpType f
+type instance ExprOpType (TensorExpr a) = TensorExpr a
+type instance ExprOpType (a,b) = (a,b)
+type instance ExprOpType (a,b,c) = (a,b,c)
+type instance ExprOpType (a,b,c,d) = (a,b,c,d)
+type instance ExprOpType [a] = [a]
+    
+
+class a ~ ExprOpType f => IsExprOp f a where
+    liftExprOp :: (Build OpDef -> a) -> Build OpDef -> f
+
+instance IsExprOp (TensorExpr a) (TensorExpr a) where
     liftExprOp = id
 
-instance IsExprOp (TensorExpr a) where
-instance IsExprOp (a,b)
-instance IsExprOp (a,b,c)
-instance IsExprOp (a,b,c,d)
-instance IsExprOp [a]
+instance IsExprOp (a,b) (a,b) where
+    liftExprOp = id
 
-instance IsExprOp f => IsExprOp ((OpDef -> OpDef) -> f) where
-    type ExprOpType ((OpDef -> OpDef) -> f) = ExprOpType f
+instance IsExprOp (a,b,c) (a,b,c) where
+    liftExprOp = id
+
+instance IsExprOp (a,b,c,d) (a,b,c,d) where
+    liftExprOp = id
+
+instance IsExprOp [a] [a] where
+    liftExprOp = id
+
+type instance ExprOpType ((OpDef -> OpDef) -> f) = ExprOpType f
+type instance ExprOpType (Build a) = ExprType a
+
+instance IsExprOp f a => IsExprOp ((OpDef -> OpDef) -> f) a where
     liftExprOp f o g = liftExprOp f (g <$> o)
 
-instance Expr a => IsExprOp (Build a) where
-    type ExprOpType (Build a) = ExprType a
-    liftExprOp f  = buildExpr . f
+-- TODO: just remove the implicit "Build"? I think it makes everything more
+-- complicated.
 
-type ExprOp a = forall f . (IsExprOp f, ExprOpType f ~ a) => f
+instance (Render a b) => IsExprOp (Build b) a where
+    liftExprOp f  = render . f
+
+type ExprOp a = forall f . (IsExprOp f a) => f
+
+-- This is useful when composing with something like "render"
+-- e.g. `render foo` won't completely typecheck if foo is overloaded, since render
+-- takes an overloaded input.
+-- This way, `render (pureOp foo)` ensures typechecking.
+-- TODO: it's a bit of an ugly wart...
+newtype PureOp a = PureOp { pureOp :: a }
+
+type instance ExprOpType (PureOp a) = a
+
+instance IsExprOp (PureOp a) a where
+    liftExprOp f o = PureOp $ f o
+
+
+{- OK, here's the issue:
+
+foo :: ExprOp (TensorExpr a)
+
+then what's the type of "render foo"?
+
+render :: Render a b => a -> Build b
+test1 :: forall f . IsExprOp f a => f
+
+need some way to know that the input to render is a *thing* and not a *reader*.
+
+OK.  It's verbose, but one way is to have an explicit 
+newtype Op a = Op OpDef (OpDef -> a)
+like I thought of before
+but that's a pain when combining...
+
+op (add (op 3))
+
+Well, the implicit way actually does lift us out of Build.
+It's not very clean though.
+-}
+
+test1 :: ExprOp (TensorExpr Float)
+test1 = undefined
+
+test2 :: Identity (Tensor Value Float, GraphState)
+test2 = runBuildT $ test1
 

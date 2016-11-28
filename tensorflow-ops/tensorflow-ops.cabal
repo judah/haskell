@@ -13,8 +13,8 @@ cabal-version:       >=1.22
 
 library
   hs-source-dirs:   src
-  exposed-modules: TensorFlow.Gradient
-                 , TensorFlow.Ops
+  exposed-modules: 
+                  TensorFlow.Ops
                  , TensorFlow.EmbeddingOps
   build-depends:  proto-lens == 0.1.*
                 , base >= 4.7 && < 5
@@ -81,6 +81,8 @@ Test-Suite ArrayOpsTest
   build-depends: HUnit
                , QuickCheck
                , base
+               , bytestring
+               , data-default-class
                , proto-lens
                , lens-family
                , google-shim
