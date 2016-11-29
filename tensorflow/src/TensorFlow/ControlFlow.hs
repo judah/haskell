@@ -52,13 +52,13 @@ withControlDependencies deps act = withNodeDependencies (nodes deps) act
 --
 -- When this op finishes, all ops in the input @n@ have finished.  This op has
 -- no output.
-group :: Nodes t => t -> BuildResult ControlNode
-group deps = buildResult []
+group :: Nodes t => t -> Build ControlNode
+group deps = buildOp []
                 $ opDef "NoOp" & opControlInputs .~ Set.toList (nodes deps)
 
 
 -- | Returns a 'Tensor' with the same shape and contents as the input.
-identity :: TensorType a => Tensor v a -> ExprOp (Tensor Value a)
+identity :: TensorType a => Tensor v a -> TensorExpr a
 identity = namedIdentity implicitName
 
 -- TODO: replace this with just "opName".
@@ -68,13 +68,13 @@ identity = namedIdentity implicitName
 -- TODO(judahjacobson): This breaks when used with uninitialize @Tensor Ref@s,
 -- since @RefIdentity@ doesn't have SetAllowsUninitializedInput().  Look into
 -- whether we can change that op.
-named :: TensorType a => Text -> Tensor v a -> ExprOp (Tensor Value a)
+named :: TensorType a => Text -> Tensor v a -> TensorExpr a
 named = namedIdentity . explicitName
 
 -- | An internal version of "identity" that allows setting the name
 -- of the output Tensor.
 namedIdentity :: forall a v . TensorType a
-              => PendingNodeName -> Tensor v a -> ExprOp (Tensor Value a)
+              => PendingNodeName -> Tensor v a -> TensorExpr a
 namedIdentity n t = exprOp [] $ pure $
     let setAttr = (opAttr "T" .~ tensorType (undefined :: a))
                 . (opInputs .~ [t ^. tensorOutput])
@@ -87,4 +87,4 @@ namedIdentity n t = exprOp [] $ pure $
 
 -- | Does nothing.  Only useful as a placeholder for control edges.
 noOp :: Build ControlNode
-noOp = buildResult [] $ opDef "NoOp"
+noOp = buildOp [] $ opDef "NoOp"

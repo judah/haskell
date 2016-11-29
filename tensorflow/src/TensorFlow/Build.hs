@@ -54,11 +54,7 @@ module TensorFlow.Build
     , Render(..)
     , RenderType
     , ExprType
-    , IsExprOp(..)
-    , ExprOp(..)
-    , ExprOpType
     , expr
-    , PureOp(..)
     -- * Creating and looking up Ops
     , getOrAddOp
     , addNewOp
@@ -372,7 +368,6 @@ newtype TensorExpr a = TensorExpr {exprOutput :: Build Output}
 expr :: Tensor v a -> TensorExpr a
 expr (Tensor _ o) = TensorExpr $ return o
 
-
 type family ExprType a where
     ExprType (Tensor v a) = TensorExpr a
     ExprType (a,b) = (ExprType a, ExprType b)
@@ -423,89 +418,3 @@ instance (Render a1 b1, Render a2 b2, Render a3 b3, Render a4 b4, Render a5 b5)
 
 instance Render a b => Render [a] [b] where
     render = mapM render
-
-type family ExprOpType f
-type instance ExprOpType (TensorExpr a) = TensorExpr a
-type instance ExprOpType (a,b) = (a,b)
-type instance ExprOpType (a,b,c) = (a,b,c)
-type instance ExprOpType (a,b,c,d) = (a,b,c,d)
-type instance ExprOpType (a,b,c,d,e) = (a,b,c,d,e)
-type instance ExprOpType [a] = [a]
-    
-
-class a ~ ExprOpType f => IsExprOp f a where
-    liftExprOp :: (Build OpDef -> a) -> Build OpDef -> f
-
-instance IsExprOp (TensorExpr a) (TensorExpr a) where
-    liftExprOp = id
-
-instance IsExprOp (a,b) (a,b) where
-    liftExprOp = id
-
-instance IsExprOp (a,b,c) (a,b,c) where
-    liftExprOp = id
-
-instance IsExprOp (a,b,c,d) (a,b,c,d) where
-    liftExprOp = id
-
-instance IsExprOp (a,b,c,d,e) (a,b,c,d,e) where
-    liftExprOp = id
-
-instance IsExprOp [a] [a] where
-    liftExprOp = id
-
-type instance ExprOpType ((OpDef -> OpDef) -> f) = ExprOpType f
-type instance ExprOpType (Build a) = ExprType a
-
-instance IsExprOp f a => IsExprOp ((OpDef -> OpDef) -> f) a where
-    liftExprOp f o g = liftExprOp f (g <$> o)
-
--- TODO: just remove the implicit "Build"? I think it makes everything more
--- complicated.
-
-instance (Render a b) => IsExprOp (Build b) a where
-    liftExprOp f  = render . f
-
-type ExprOp a = forall f . (IsExprOp f (ExprType a)) => f
-
--- This is useful when composing with something like "render"
--- e.g. `render foo` won't completely typecheck if foo is overloaded, since render
--- takes an overloaded input.
--- This way, `render (pureOp foo)` ensures typechecking.
--- TODO: it's a bit of an ugly wart...
-newtype PureOp a = PureOp { pureOp :: a }
-
-type instance ExprOpType (PureOp a) = a
-
-instance IsExprOp (PureOp a) a where
-    liftExprOp f o = PureOp $ f o
-
-
-{- OK, here's the issue:
-
-foo :: ExprOp (TensorExpr a)
-
-then what's the type of "render foo"?
-
-render :: Render a b => a -> Build b
-test1 :: forall f . IsExprOp f a => f
-
-need some way to know that the input to render is a *thing* and not a *reader*.
-
-OK.  It's verbose, but one way is to have an explicit 
-newtype Op a = Op OpDef (OpDef -> a)
-like I thought of before
-but that's a pain when combining...
-
-op (add (op 3))
-
-Well, the implicit way actually does lift us out of Build.
-It's not very clean though.
--}
-
-test1 :: ExprOp (Tensor Value Float)
-test1 = undefined
-
-test2 :: Identity (Tensor Value Float, GraphState)
-test2 = runBuildT $ test1
-

@@ -60,7 +60,6 @@ import Lens.Family2.Unchecked (lens)
 import Proto.Tensorflow.Core.Framework.Graph (node)
 import Proto.Tensorflow.Core.Protobuf.Config (ConfigProto)
 import TensorFlow.Build
-import TensorFlow.BuildOp (MonadOp(..), IsResult(..))
 import TensorFlow.Nodes
 import TensorFlow.Output (NodeName, unNodeName, renderOutput)
 import TensorFlow.Tensor
@@ -134,12 +133,6 @@ runSessionWithOptions options (Session m) =
 -- renderings.
 build :: Build a -> Session a
 build = Session . lift . hoistBuildT (return . runIdentity)
-
-instance MonadOp Session where
-    askOpModifier = pure id
-
-instance IsResult Build Session where
-    liftResult = build
 
 -- | Lift a 'Build' action into a 'Session', including any explicit op
 -- renderings. Returns the merged summary ops which can be used for
@@ -233,9 +226,3 @@ asyncProdNodes ns = do
     state <- Session ask
     let loop = forever (void (FFI.run (rawSession state) [] [] targetNames))
     liftIO (asyncCollector state loop)
-
--- TODO: is this a bad idea?
-instance Render a b  => IsExprOp (Session b) a where
-    liftExprOp f  = build . render . f
-
-type instance ExprOpType (Session a) = ExprType a
