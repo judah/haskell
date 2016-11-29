@@ -58,7 +58,7 @@ group deps = buildResult []
 
 
 -- | Returns a 'Tensor' with the same shape and contents as the input.
-identity :: TensorType a => Tensor v a -> ExprOp (TensorExpr a)
+identity :: TensorType a => Tensor v a -> ExprOp (Tensor Value a)
 identity = namedIdentity implicitName
 
 -- TODO: replace this with just "opName".
@@ -68,13 +68,13 @@ identity = namedIdentity implicitName
 -- TODO(judahjacobson): This breaks when used with uninitialize @Tensor Ref@s,
 -- since @RefIdentity@ doesn't have SetAllowsUninitializedInput().  Look into
 -- whether we can change that op.
-named :: TensorType a => Text -> Tensor v a -> ExprOp (TensorExpr a)
+named :: TensorType a => Text -> Tensor v a -> ExprOp (Tensor Value a)
 named = namedIdentity . explicitName
 
 -- | An internal version of "identity" that allows setting the name
 -- of the output Tensor.
 namedIdentity :: forall a v . TensorType a
-              => PendingNodeName -> Tensor v a -> ExprOp (TensorExpr a)
+              => PendingNodeName -> Tensor v a -> ExprOp (Tensor Value a)
 namedIdentity n t = exprOp [] $ pure $
     let setAttr = (opAttr "T" .~ tensorType (undefined :: a))
                 . (opInputs .~ [t ^. tensorOutput])

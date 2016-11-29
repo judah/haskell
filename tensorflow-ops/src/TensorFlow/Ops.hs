@@ -152,7 +152,7 @@ instance ( TensorType a
     negate = CoreOps.neg
 
 matTranspose :: forall a . TensorType a
-             => TensorExpr a -> ExprOp (TensorExpr a)
+             => TensorExpr a -> ExprOp (Tensor Value a)
 matTranspose = flip CoreOps.transpose (vector [1, 0 :: Int32])
 
 
@@ -253,17 +253,17 @@ vector :: TensorType a => [a] -> TensorExpr a
 vector xs = constant [fromIntegral $ length xs] xs
 
 -- | Create a constant scalar.
-scalar :: forall a . TensorType a => a -> ExprOp (TensorExpr a)
+scalar :: forall a . TensorType a => a -> ExprOp (Tensor Value a)
 scalar x = constant [] [x]
 
-zeros :: forall a . (Num a, TensorType a) => Shape -> ExprOp (TensorExpr a)
+zeros :: forall a . (Num a, TensorType a) => Shape -> ExprOp (Tensor Value a)
 zeros (Shape shape') = CoreOps.fill (vector $ map fromIntegral shape') (scalar 0)
 
-shape :: (TensorType t) => TensorExpr t -> ExprOp (TensorExpr Int32)
+shape :: (TensorType t) => TensorExpr t -> ExprOp (Tensor Value Int32)
 shape = CoreOps.shape
 
 expandDims :: (TensorType t) => TensorExpr t -> TensorExpr Int32
-            -> ExprOp (TensorExpr t)
+            -> ExprOp (Tensor Value t)
 expandDims = CoreOps.expandDims
 
 -- | Helper function for reduction ops (translation of math_ops.reduced_shape).

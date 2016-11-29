@@ -378,6 +378,7 @@ type family ExprType a where
     ExprType (a,b) = (ExprType a, ExprType b)
     ExprType (a,b,c) = (ExprType a, ExprType b, ExprType c)
     ExprType (a,b,c,d) = (ExprType a, ExprType b, ExprType c, ExprType d)
+    ExprType (a,b,c,d,e) = (ExprType a, ExprType b, ExprType c, ExprType d, ExprType e)
     ExprType [a] = [ExprType a]
 
 type family RenderType a where
@@ -385,6 +386,7 @@ type family RenderType a where
     RenderType (a,b) = (RenderType a, RenderType b)
     RenderType (a,b,c) = (RenderType a, RenderType b, RenderType c)
     RenderType (a,b,c,d) = (RenderType a, RenderType b, RenderType c, RenderType d)
+    RenderType (a,b,c,d,e) = (RenderType a, RenderType b, RenderType c, RenderType d, RenderType e)
     RenderType [a] = [RenderType a]
 
 -- TODO: don't use fundeps (and then see if UndecidableInstances can be removed)
@@ -410,6 +412,15 @@ instance (Render a1 b1, Render a2 b2, Render a3 b3, Render a4 b4)
                                  <*> render x3
                                  <*> render x4
 
+instance (Render a1 b1, Render a2 b2, Render a3 b3, Render a4 b4, Render a5 b5)
+    => Render (a1, a2, a3, a4, a5) (b1, b2, b3, b4, b5) where
+    render (x1,x2,x3,x4,x5) = (,,,,) <$> render x1
+                                 <*> render x2
+                                 <*> render x3
+                                 <*> render x4
+                                 <*> render x5
+
+
 instance Render a b => Render [a] [b] where
     render = mapM render
 
@@ -418,6 +429,7 @@ type instance ExprOpType (TensorExpr a) = TensorExpr a
 type instance ExprOpType (a,b) = (a,b)
 type instance ExprOpType (a,b,c) = (a,b,c)
 type instance ExprOpType (a,b,c,d) = (a,b,c,d)
+type instance ExprOpType (a,b,c,d,e) = (a,b,c,d,e)
 type instance ExprOpType [a] = [a]
     
 
@@ -436,6 +448,9 @@ instance IsExprOp (a,b,c) (a,b,c) where
 instance IsExprOp (a,b,c,d) (a,b,c,d) where
     liftExprOp = id
 
+instance IsExprOp (a,b,c,d,e) (a,b,c,d,e) where
+    liftExprOp = id
+
 instance IsExprOp [a] [a] where
     liftExprOp = id
 
@@ -451,7 +466,7 @@ instance IsExprOp f a => IsExprOp ((OpDef -> OpDef) -> f) a where
 instance (Render a b) => IsExprOp (Build b) a where
     liftExprOp f  = render . f
 
-type ExprOp a = forall f . (IsExprOp f a) => f
+type ExprOp a = forall f . (IsExprOp f (ExprType a)) => f
 
 -- This is useful when composing with something like "render"
 -- e.g. `render foo` won't completely typecheck if foo is overloaded, since render
@@ -488,7 +503,7 @@ Well, the implicit way actually does lift us out of Build.
 It's not very clean though.
 -}
 
-test1 :: ExprOp (TensorExpr Float)
+test1 :: ExprOp (Tensor Value Float)
 test1 = undefined
 
 test2 :: Identity (Tensor Value Float, GraphState)

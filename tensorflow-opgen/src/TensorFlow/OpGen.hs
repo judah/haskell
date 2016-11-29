@@ -356,20 +356,20 @@ typeSig pOp = constraints
         AttrShape -> "Shape"
         AttrTensor -> "TensorProto"
 
-    tensorArgAndComment t = tensorArg pOp t <+> hang 0 ("-- ^" <+> argComment t)
+    tensorArgAndComment t = tensorArg True pOp t <+> hang 0 ("-- ^" <+> argComment t)
     outputs = case parsedOutputs pOp of
         [] -> wrapBuild "ControlNode"
         -- TODO(judahjacobson): To improve indentation: `tensorArgAndComment a`
-        [a] -> wrapBuild (tensorArg pOp a) <+> "-- ^" <+> argComment a
-        as -> wrapBuild (tuple (map (tensorArg pOp) as)) <+/> resultComment as
+        [a] -> wrapBuild (tensorArg False pOp a) <+> "-- ^" <+> argComment a
+        as -> wrapBuild (tuple (map (tensorArg False pOp) as)) <+/> resultComment as
     wrapBuild o
         | parsedOpIsStateful pOp = "BuildResult" <+> parens o
         | otherwise = "ExprOp" <+> parens o
 
 -- | Render an op input or output.
 -- For example: "Tensor Ref Int64", "Tensor v t", "ResourceHandle dtype"
-tensorArg :: ParsedOp -> ParsedArg -> Doc
-tensorArg pOp p = case parsedArgCase p of
+tensorArg :: Bool -> ParsedOp -> ParsedArg -> Doc
+tensorArg isInput pOp p = case parsedArgCase p of
     SimpleArg { argType = t } -> tensorType t
     ListArg { argType = t } -> brackets $ tensorType t
     MixedListArg {} -> "{{{tensorArg: can't handle heterogeneous lists}}}"
@@ -383,10 +383,10 @@ tensorArg pOp p = case parsedArgCase p of
                 -- TODO: more robust logic around TensorExpr;
                 -- decide in parseOp?
                 ArgTensorValue
-                    | not (parsedOpIsStateful pOp) -> "TensorExpr"
+                    | isInput && not (parsedOpIsStateful pOp) -> "TensorExpr"
                     | otherwise -> "Tensor Value"
                 ArgTensorEither v'
-                    | not (parsedOpIsStateful pOp) -> "TensorExpr"
+                    | isInput && not (parsedOpIsStateful pOp) -> "TensorExpr"
                     | otherwise -> "Tensor" <+> strictText v'
                 ArgResource -> "ResourceHandle"
         in v <+> a
