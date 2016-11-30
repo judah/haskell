@@ -12,6 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -180,10 +181,15 @@ renderQuotedTFName = dquotes . renderTFName
 renderOp :: ParsedOp -> Doc
 renderOp pOp = stack $
     [ haddocks
-    -- TODO: adding these back makes compilation looong
+    -- Prevent unreasonably long compilation times on ghc-7.10.
+    -- It seems that the slowdown is due to stack -- calling "-ddump-hi" which
+    -- (unnecessarily) includes the inlining information, and is large for
+    -- ops with many arguments.
+#if __GLASGOW_HASKELL__ < 800
+    , "{-# NOINLINE " <> n <> " #-}"
+#endif
     , n <+> "::" <+> hang 0 (typeSig empty pOp)
-    , n <+> hang 0 args <+> "=" </> "  let op'options=id in" <+> indent indentation (functionBody pOp)
-    -- TODO: a better type, so we can do "def & ..." as the argument here?
+    , n <+> "=" <+> n <> "' id"
     , n <> "' ::" <+> hang 0 (typeSig "(OpDef -> OpDef) ->" pOp)
     , n <> "'" <+> hang 0 ("op'options" <+> args) <+> "|" <+> funcGuard listSizeAttrs
                 <+> "=" </>  -- args are indented
