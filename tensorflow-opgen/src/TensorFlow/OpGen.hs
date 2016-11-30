@@ -135,6 +135,13 @@ docOpList flags opList =
                   (map renderOpAndExtras $
                    filter (not . flip elem exclusions . view name) $
                    toList $ opList ^. op)
+    -- ..20: 14s
+    -- ..15: 10s
+    -- ..12: 3.5s
+    -- ..11: 2.4s
+    -- ..10: 0.6s
+    -- 11,12: 4s
+    -- 12: 2.4s
         ]
   where moduleName =
             Text.pack (prefix flags) <> "." <> camelCase
@@ -153,7 +160,7 @@ imports = stack [
     , "import Lens.Family2 ((.~), (&), (^.))"
     , "import TensorFlow.Build"
     , "import TensorFlow.BuildOp"
-    , "import TensorFlow.Output (ResourceHandle(..))"
+    , "import TensorFlow.Output (ResourceHandle(..), OpDef)"
     , "import TensorFlow.Tensor"
     , "import TensorFlow.Types"
     ]
@@ -173,8 +180,12 @@ renderQuotedTFName = dquotes . renderTFName
 renderOp :: ParsedOp -> Doc
 renderOp pOp = stack $
     [ haddocks
-    , n <+> "::" <+> hang 0 (typeSig pOp)
-    , n <+> hang 0 args <+> "|" <+> funcGuard listSizeAttrs
+    -- TODO: adding these back makes compilation looong
+    , n <+> "::" <+> hang 0 (typeSig empty pOp)
+    , n <+> hang 0 args <+> "=" </> "  let op'options=id in" <+> indent indentation (functionBody pOp)
+    -- TODO: a better type, so we can do "def & ..." as the argument here?
+    , n <> "' ::" <+> hang 0 (typeSig "(OpDef -> OpDef) ->" pOp)
+    , n <> "'" <+> hang 0 ("op'options" <+> args) <+> "|" <+> funcGuard listSizeAttrs
                 <+> "=" </>  -- args are indented
                     -- the body needs to be indented wrt the name
                     indent indentation (functionBody pOp)
@@ -329,9 +340,9 @@ extras d = enclose "{-\n" "\n-}" $
 --      => Float -> Tensor t1 v1 -> Tensor t2 v2
 -- where "Float" is an explicit input attribute, "Tensor t1 v1" is an input, and
 -- "Tensor t2 v2" is an output.
-typeSig :: ParsedOp -> Doc
-typeSig pOp = constraints
-            <+/> signatureFold (map attrInput (explicitInputAttrs pOp)
+typeSig :: Doc -> ParsedOp -> Doc
+typeSig extra pOp = constraints
+            <+/> extra </> signatureFold (map attrInput (explicitInputAttrs pOp)
                                 ++ map tensorArgAndComment (parsedInputs pOp)
                                 ++ [outputs])
   where
