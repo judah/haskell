@@ -15,6 +15,7 @@ library
   exposed-modules:  TensorFlow.GenOps.Core
   build-depends:  Cabal >= 1.22 && < 1.25
                 , bytestring
+                , directory
                 , proto-lens == 0.1.*
                 , tensorflow-opgen == 0.1.*
                 , tensorflow == 0.1.*
