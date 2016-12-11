@@ -152,7 +152,7 @@ instance ( TensorType a
     negate = CoreOps.neg
 
 matTranspose :: forall a . TensorType a
-             => TensorExpr a -> ExprOp (Tensor Value a)
+             => TensorExpr a -> TensorExpr a
 matTranspose = flip CoreOps.transpose (vector [1, 0 :: Int32])
 
 
@@ -163,7 +163,9 @@ initializedVariable :: forall a v . TensorType a
 initializedVariable initializer = do
     v <- CoreOps.variable []  -- The shape is not known initially.
     (i :: Tensor Ref a) <-
-        CoreOps.assign v initializer &>> opAttr "validate_shape" .~ False
+        CoreOps.assign'
+            (opAttr "validate_shape" .~ False)
+            v initializer
     addInitializer =<< group i
     return v
 
@@ -171,7 +173,7 @@ initializedVariable initializer = do
 zeroInitializedVariable
   :: (TensorType a, Num a) =>
      TensorFlow.Types.Shape -> Build (Tensor TensorFlow.Tensor.Ref a)
-zeroInitializedVariable s = zeros s >>= initializedVariable
+zeroInitializedVariable s = render (zeros s) >>= initializedVariable
 
 -- TODO: BuildResult?
 -- TODO: the tensors might need the "foo:k" format...
@@ -185,9 +187,9 @@ save path xs = do
                     :: Tensor v a -> TensorExpr ByteString
     let names = map f xs :: [TensorExpr ByteString]
     let types = replicate (length xs) (tensorType (undefined :: a))
-    p <- scalar path
-    n :: Tensor Value ByteString <- CoreOps.pack names
-    buildResult [] $ opDef "Save"
+    p <- render $ scalar path
+    n :: Tensor Value ByteString <- render $ CoreOps.pack names
+    buildOp [] $ opDef "Save"
                                     & opAttr "T" .~ types
                                 & opInputs .~ ([p ^. tensorOutput, n ^. tensorOutput]
                                             ++ map (^. tensorOutput) xs)
@@ -201,8 +203,8 @@ restoreFromName :: forall a . TensorType a
                 -> ByteString    -- ^ Tensor name override.
                 -> Tensor Ref a  -- ^ Tensor to restore.
                 -> Build ControlNode
-restoreFromName path name x =
-    CoreOps.restore (scalar path) (scalar name)
+restoreFromName path name x = do
+    render (CoreOps.restore (scalar path) (scalar name))
         >>= CoreOps.assign x
         >>= group
 
@@ -222,10 +224,10 @@ restore path x = do
 --   element 0:   index (0, ..., 0)
 --   element 1:   index (0, ..., 1)
 --   ...
-constant :: forall a . TensorType a => Shape -> [a] -> ExprOp (TensorExpr a)
+constant :: forall a . TensorType a => Shape -> [a] -> TensorExpr a
 constant (Shape shape') values
     | invalidLength = error invalidLengthMsg
-    | otherwise = CoreOps.const (opAttr "value" .~ typedNode)
+    | otherwise = CoreOps.const' (opAttr "value" .~ typedNode)
   where
     invalidLength = product shape' /= fromIntegral (length values)
     invalidLengthMsg = printf "invalid tensor length: expected %d got %d"
@@ -242,7 +244,7 @@ constant (Shape shape') values
 -- | Reshape a N-D tensor down to a scalar.
 -- 
 -- See `TensorFlow.GenOps.Core.reshape`.
-scalarize :: (TensorType a) => TensorExpr a -> ExprOp (TensorExpr a)
+scalarize :: (TensorType a) => TensorExpr a -> TensorExpr a
 scalarize t = CoreOps.reshape t (vector scalarShape)
     where
         scalarShape = [] :: [Int32]
@@ -253,17 +255,17 @@ vector :: TensorType a => [a] -> TensorExpr a
 vector xs = constant [fromIntegral $ length xs] xs
 
 -- | Create a constant scalar.
-scalar :: forall a . TensorType a => a -> ExprOp (Tensor Value a)
+scalar :: forall a . TensorType a => a -> TensorExpr a
 scalar x = constant [] [x]
 
-zeros :: forall a . (Num a, TensorType a) => Shape -> ExprOp (Tensor Value a)
+zeros :: forall a . (Num a, TensorType a) => Shape -> TensorExpr a
 zeros (Shape shape') = CoreOps.fill (vector $ map fromIntegral shape') (scalar 0)
 
-shape :: (TensorType t) => TensorExpr t -> ExprOp (Tensor Value Int32)
+shape :: (TensorType t) => TensorExpr t -> TensorExpr Int32
 shape = CoreOps.shape
 
 expandDims :: (TensorType t) => TensorExpr t -> TensorExpr Int32
-            -> ExprOp (Tensor Value t)
+            -> TensorExpr t
 expandDims = CoreOps.expandDims
 
 -- | Helper function for reduction ops (translation of math_ops.reduced_shape).

@@ -253,6 +253,7 @@ functionBody pOp
         [ "& opAttr" <+> renderQuotedTFName n <+> ".~" <+> renderHaskellName n
         | a <- inferredListSizeAttrs pOp, let n = attrName a
         ]
+        ++ ["& op'options"]
         ++ if null (parsedInputs pOp)
             then []
             else ["& opInputs .~ " <+> inputsList pOp (parsedInputs pOp)]
