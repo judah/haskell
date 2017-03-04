@@ -58,7 +58,7 @@ module TensorFlow.Ops
 --   <li>NOTE*: <tt>Add</tt> supports broadcasting. <tt>AddN</tt> does not.
 --   More about broadcasting <a>here</a></li>
 --   </ul>
-add :: (TensorType t, OneOf ((:) * (Complex Double) ((:) * (Complex Float) ((:) * ByteString ((:) * Int16 ((:) * Int32 ((:) * Int64 ((:) * Int8 ((:) * Word16 ((:) * Word8 ((:) * Double ((:) * Float ([] *)))))))))))) t) => Tensor v1 t -> Tensor v2 t -> Tensor Value t
+add :: OneOf ((:) * (Complex Double) ((:) * (Complex Float) ((:) * ByteString ((:) * Int16 ((:) * Int32 ((:) * Int64 ((:) * Int8 ((:) * Word16 ((:) * Word8 ((:) * Double ((:) * Float ([] *)))))))))))) t => Tensor v1 t -> Tensor v2 t -> Tensor Value t
 
 -- | Computes the absolute value of a tensor.
 --   
@@ -66,14 +66,14 @@ add :: (TensorType t, OneOf ((:) * (Complex Double) ((:) * (Complex Float) ((:) 
 --   the absolute value of each element in <tt>x</tt>. For example, if x is
 --   an input element and y is an output element, this operation computes
 --   \(y = |x|\).
-abs :: (TensorType t, OneOf ((:) * Int32 ((:) * Int64 ((:) * Word16 ((:) * Double ((:) * Float ([] *)))))) t) => Tensor v1 t -> Tensor Value t
+abs :: OneOf ((:) * Int32 ((:) * Int64 ((:) * Word16 ((:) * Double ((:) * Float ([] *)))))) t => Tensor v1 t -> Tensor Value t
 
 -- | Add all input tensors element wise.
-addN :: (TensorType t, OneOf ((:) * (Complex Double) ((:) * (Complex Float) ((:) * Int16 ((:) * Int32 ((:) * Int64 ((:) * Int8 ((:) * Word16 ((:) * Word8 ((:) * Double ((:) * Float ([] *))))))))))) t) => [Tensor v1 t] -> Tensor Value t
+addN :: OneOf ((:) * (Complex Double) ((:) * (Complex Float) ((:) * Int16 ((:) * Int32 ((:) * Int64 ((:) * Int8 ((:) * Word16 ((:) * Word8 ((:) * Double ((:) * Float ([] *))))))))))) t => [Tensor v1 t] -> Tensor Value t
 
 -- | Returns the index with the largest value across dimensions of a
 --   tensor.
-argMax :: (TensorType t, OneOf ((:) * (Complex Double) ((:) * (Complex Float) ((:) * Int16 ((:) * Int32 ((:) * Int64 ((:) * Int8 ((:) * Word16 ((:) * Word8 ((:) * Double ((:) * Float ([] *))))))))))) t, TensorType tidx, OneOf ((:) * Int32 ((:) * Int64 ([] *))) tidx) => Tensor v1 t -> Tensor v2 tidx -> Tensor Value Int64
+argMax :: (OneOf ((:) * (Complex Double) ((:) * (Complex Float) ((:) * Int16 ((:) * Int32 ((:) * Int64 ((:) * Int8 ((:) * Word16 ((:) * Word8 ((:) * Double ((:) * Float ([] *))))))))))) t, OneOf ((:) * Int32 ((:) * Int64 ([] *))) tidx) => Tensor v1 t -> Tensor v2 tidx -> Tensor Value Int64
 
 -- | Update <tt>ref</tt> by assigning <a>value</a> to it.
 --   
@@ -86,7 +86,7 @@ assign :: TensorType t => Tensor Ref t -> Tensor v2 t -> Build (Tensor Ref t)
 --   
 --   This is typically used by gradient computations for a broadcasting
 --   operation.
-broadcastGradientArgs :: (TensorType t, OneOf ((:) * Int32 ((:) * Int64 ([] *))) t) => Tensor v1 t -> Tensor v2 t -> (Tensor Value t, Tensor Value t)
+broadcastGradientArgs :: OneOf ((:) * Int32 ((:) * Int64 ([] *))) t => Tensor v1 t -> Tensor v2 t -> (Tensor Value t, Tensor Value t)
 
 -- | Cast x of type SrcT to y of DstT.
 cast :: (TensorType srcT, TensorType dstT) => Tensor v1 srcT -> Tensor Value dstT
@@ -107,7 +107,7 @@ constant :: TensorType a => Shape -> [a] -> Tensor Value a
 --   <li>NOTE*: <tt>Equal</tt> supports broadcasting. More about
 --   broadcasting <a>here</a></li>
 --   </ul>
-equal :: (TensorType t, OneOf ((:) * (Complex Double) ((:) * (Complex Float) ((:) * Bool ((:) * ByteString ((:) * Int16 ((:) * Int32 ((:) * Int64 ((:) * Int8 ((:) * Word16 ((:) * Word8 ((:) * Double ((:) * Float ([] *))))))))))))) t) => Tensor v1 t -> Tensor v2 t -> Tensor Value Bool
+equal :: OneOf ((:) * (Complex Double) ((:) * (Complex Float) ((:) * Bool ((:) * ByteString ((:) * Int16 ((:) * Int32 ((:) * Int64 ((:) * Int8 ((:) * Word16 ((:) * Word8 ((:) * Double ((:) * Float ([] *))))))))))))) t => Tensor v1 t -> Tensor v2 t -> Tensor Value Bool
 expandDims :: (TensorType t) => Tensor v1 t -> Tensor v2 Int32 -> Tensor Value t
 
 -- | Creates a variable initialized to the given value. Initialization
@@ -181,7 +181,7 @@ fill :: TensorType t => Tensor v1 Int32 -> Tensor v2 t -> Tensor Value t
 --   ```output = [ [1.0, 0.0, 0.0] // one_hot(0) [0.0, 0.0, 1.0] //
 --   one_hot(2) ][ [0.0, 1.0, 0.0] // one_hot(1) [0.0, 0.0, 0.0] //
 --   one_hot(-1) ]```
-oneHot :: (TensorType t, TensorType tI, OneOf ((:) * Int32 ((:) * Int64 ((:) * Word8 ([] *)))) tI) => Tensor v1 tI -> Tensor v2 Int32 -> Tensor v3 t -> Tensor v4 t -> Tensor Value t
+oneHot :: (TensorType t, OneOf ((:) * Int32 ((:) * Int64 ((:) * Word8 ([] *)))) tI) => Tensor v1 tI -> Tensor v2 Int32 -> Tensor v3 t -> Tensor v4 t -> Tensor Value t
 
 -- | Multiply the matrix "a" by the matrix "b".
 --   
@@ -194,7 +194,7 @@ oneHot :: (TensorType t, TensorType tI, OneOf ((:) * Int32 ((:) * Int64 ((:) * W
 --   <li>Note*: The default kernel implementation for MatMul on GPUs uses
 --   cublas.</li>
 --   </ul>
-matMul :: (TensorType t, OneOf ((:) * (Complex Double) ((:) * (Complex Float) ((:) * Int32 ((:) * Word16 ((:) * Double ((:) * Float ([] *))))))) t) => Tensor v1 t -> Tensor v2 t -> Tensor Value t
+matMul :: OneOf ((:) * (Complex Double) ((:) * (Complex Float) ((:) * Int32 ((:) * Word16 ((:) * Double ((:) * Float ([] *))))))) t => Tensor v1 t -> Tensor v2 t -> Tensor Value t
 matTranspose :: TensorType a => Tensor v a -> Tensor Value a
 
 -- | Computes the mean of elements across dimensions of a tensor.
@@ -204,7 +204,7 @@ matTranspose :: TensorType a => Tensor v a -> Tensor Value a
 --   rank of the tensor is reduced by 1 for each entry in
 --   <tt>reduction_indices</tt>. If <tt>keep_dims</tt> is true, the reduced
 --   dimensions are retained with length 1.
-mean :: (TensorType t, OneOf ((:) * (Complex Double) ((:) * (Complex Float) ((:) * Int16 ((:) * Int32 ((:) * Int64 ((:) * Int8 ((:) * Word16 ((:) * Word8 ((:) * Double ((:) * Float ([] *))))))))))) t, TensorType tidx, OneOf ((:) * Int32 ((:) * Int64 ([] *))) tidx) => Tensor v1 t -> Tensor v2 tidx -> Tensor Value t
+mean :: (OneOf ((:) * (Complex Double) ((:) * (Complex Float) ((:) * Int16 ((:) * Int32 ((:) * Int64 ((:) * Int8 ((:) * Word16 ((:) * Word8 ((:) * Double ((:) * Float ([] *))))))))))) t, OneOf ((:) * Int32 ((:) * Int64 ([] *))) tidx) => Tensor v1 t -> Tensor v2 tidx -> Tensor Value t
 
 -- | Returns x * y element-wise.
 --   
@@ -212,12 +212,12 @@ mean :: (TensorType t, OneOf ((:) * (Complex Double) ((:) * (Complex Float) ((:)
 --   <li>NOTE*: <tt>Mul</tt> supports broadcasting. More about broadcasting
 --   <a>here</a></li>
 --   </ul>
-mul :: (TensorType t, OneOf ((:) * (Complex Double) ((:) * (Complex Float) ((:) * Int16 ((:) * Int32 ((:) * Int64 ((:) * Int8 ((:) * Word16 ((:) * Word8 ((:) * Double ((:) * Float ([] *))))))))))) t) => Tensor v1 t -> Tensor v2 t -> Tensor Value t
+mul :: OneOf ((:) * (Complex Double) ((:) * (Complex Float) ((:) * Int16 ((:) * Int32 ((:) * Int64 ((:) * Int8 ((:) * Word16 ((:) * Word8 ((:) * Double ((:) * Float ([] *))))))))))) t => Tensor v1 t -> Tensor v2 t -> Tensor Value t
 
 -- | Computes numerical negative value element-wise.
 --   
 --   I.e., \(y = -x\).
-neg :: (TensorType t, OneOf ((:) * (Complex Double) ((:) * (Complex Float) ((:) * Int32 ((:) * Int64 ((:) * Word16 ((:) * Double ((:) * Float ([] *)))))))) t) => Tensor v1 t -> Tensor Value t
+neg :: OneOf ((:) * (Complex Double) ((:) * (Complex Float) ((:) * Int32 ((:) * Int64 ((:) * Word16 ((:) * Double ((:) * Float ([] *)))))))) t => Tensor v1 t -> Tensor Value t
 
 -- | Packs a list of <tt>N</tt> rank-<tt>R</tt> tensors into one
 --   rank-`(R+1)` tensor.
@@ -252,17 +252,17 @@ placeholder :: TensorType a => Shape -> Build (Tensor Value a)
 --   
 --   ``` # <tt>start</tt> is 3 # <tt>limit</tt> is 18 # <tt>delta</tt> is 3
 --   tf.range(start, limit, delta) ==&gt; [3, 6, 9, 12, 15] ```
-range :: (TensorType tidx, OneOf ((:) * Int32 ((:) * Int64 ((:) * Double ((:) * Float ([] *))))) tidx) => Tensor v1 tidx -> Tensor v2 tidx -> Tensor v3 tidx -> Tensor Value tidx
+range :: OneOf ((:) * Int32 ((:) * Int64 ((:) * Double ((:) * Float ([] *))))) tidx => Tensor v1 tidx -> Tensor v2 tidx -> Tensor v3 tidx -> Tensor Value tidx
 
 -- | Helper function for reduction ops (translation of
 --   math_ops.reduced_shape).
 reducedShape :: (OneOf '[Int32, Int64] t1, OneOf '[Int32, Int64] t2) => Tensor v1 t1 -> Tensor v2 t2 -> Tensor Value Int32
 
 -- | Computes rectified linear: `max(features, 0)`.
-relu :: (TensorType t, OneOf ((:) * Int16 ((:) * Int32 ((:) * Int64 ((:) * Int8 ((:) * Word16 ((:) * Word8 ((:) * Double ((:) * Float ([] *))))))))) t) => Tensor v1 t -> Tensor Value t
+relu :: OneOf ((:) * Int16 ((:) * Int32 ((:) * Int64 ((:) * Int8 ((:) * Word16 ((:) * Word8 ((:) * Double ((:) * Float ([] *))))))))) t => Tensor v1 t -> Tensor Value t
 
 -- | Computes rectified linear gradients for a Relu operation.
-reluGrad :: (TensorType t, OneOf ((:) * Int16 ((:) * Int32 ((:) * Int64 ((:) * Int8 ((:) * Word16 ((:) * Word8 ((:) * Double ((:) * Float ([] *))))))))) t) => Tensor v1 t -> Tensor v2 t -> Tensor Value t
+reluGrad :: OneOf ((:) * Int16 ((:) * Int32 ((:) * Int64 ((:) * Int8 ((:) * Word16 ((:) * Word8 ((:) * Double ((:) * Float ([] *))))))))) t => Tensor v1 t -> Tensor v2 t -> Tensor Value t
 
 -- | Reshapes a tensor.
 --   
@@ -305,7 +305,7 @@ reluGrad :: (TensorType t, OneOf ((:) * Int16 ((:) * Int32 ((:) * Int64 ((:) * I
 --   
 --   # tensor <tt>t</tt> is [7] # shape `[]` reshapes to a scalar
 --   reshape(t, []) ==&gt; 7 ```
-reshape :: (TensorType t, TensorType tshape, OneOf ((:) * Int32 ((:) * Int64 ([] *))) tshape) => Tensor v1 t -> Tensor v2 tshape -> Tensor Value t
+reshape :: (TensorType t, OneOf ((:) * Int32 ((:) * Int64 ([] *))) tshape) => Tensor v1 t -> Tensor v2 tshape -> Tensor Value t
 
 -- | Restore a tensor's value from a checkpoint file.
 restore :: TensorType a => ByteString -> Tensor Ref a -> Build ControlNode
@@ -327,7 +327,7 @@ shape :: (TensorType t) => Tensor v1 t -> Tensor Value Int32
 --   
 --   For complex numbers, `y = sign(x) = x / |x|` if `x != 0`, otherwise `y
 --   = 0`.
-sign :: (TensorType t, OneOf ((:) * (Complex Double) ((:) * (Complex Float) ((:) * Int32 ((:) * Int64 ((:) * Word16 ((:) * Double ((:) * Float ([] *)))))))) t) => Tensor v1 t -> Tensor Value t
+sign :: OneOf ((:) * (Complex Double) ((:) * (Complex Float) ((:) * Int32 ((:) * Int64 ((:) * Word16 ((:) * Double ((:) * Float ([] *)))))))) t => Tensor v1 t -> Tensor Value t
 
 -- | Returns the size of a tensor.
 --   
@@ -338,19 +338,19 @@ sign :: (TensorType t, OneOf ((:) * (Complex Double) ((:) * (Complex Float) ((:)
 --   
 --   ```prettyprint # <tt>t</tt> is [[[1, 1,, 1], [2, 2, 2]], [[3, 3, 3],
 --   [4, 4, 4]]]] size(t) ==&gt; 12 ```
-size :: (TensorType t, TensorType out_type, OneOf ((:) * Int32 ((:) * Int64 ([] *))) out_type) => Tensor v1 t -> Tensor Value out_type
+size :: (TensorType t, OneOf ((:) * Int32 ((:) * Int64 ([] *))) out_type) => Tensor v1 t -> Tensor Value out_type
 
 -- | Computes softmax activations.
 --   
 --   For each batch <tt>i</tt> and class <tt>j</tt> we have
 --   
 --   softmax[i, j] = exp(logits[i, j]) / sum_j(exp(logits[i, j]))
-softmax :: (TensorType t, OneOf ((:) * Word16 ((:) * Double ((:) * Float ([] *)))) t) => Tensor v1 t -> Tensor Value t
+softmax :: OneOf ((:) * Word16 ((:) * Double ((:) * Float ([] *)))) t => Tensor v1 t -> Tensor Value t
 
 -- | Computes softmax cross entropy cost and gradients to backpropagate.
 --   
 --   Inputs are the logits, not probabilities.
-softmaxCrossEntropyWithLogits :: (TensorType t, OneOf ((:) * Word16 ((:) * Double ((:) * Float ([] *)))) t) => Tensor v1 t -> Tensor v2 t -> (Tensor Value t, Tensor Value t)
+softmaxCrossEntropyWithLogits :: OneOf ((:) * Word16 ((:) * Double ((:) * Float ([] *)))) t => Tensor v1 t -> Tensor v2 t -> (Tensor Value t, Tensor Value t)
 
 -- | Converts a sparse representation into a dense tensor.
 --   
@@ -374,7 +374,7 @@ softmaxCrossEntropyWithLogits :: (TensorType t, OneOf ((:) * Word16 ((:) * Doubl
 --   Indices should be sorted in lexicographic order, and indices must not
 --   contain any repeats. If <tt>validate_indices</tt> is true, these
 --   properties are checked during execution.
-sparseToDense :: (TensorType t, TensorType tindices, OneOf ((:) * Int32 ((:) * Int64 ([] *))) tindices) => Tensor v1 tindices -> Tensor v2 tindices -> Tensor v3 t -> Tensor v4 t -> Tensor Value t
+sparseToDense :: (TensorType t, OneOf ((:) * Int32 ((:) * Int64 ([] *))) tindices) => Tensor v1 tindices -> Tensor v2 tindices -> Tensor v3 t -> Tensor v4 t -> Tensor Value t
 
 -- | Returns x - y element-wise.
 --   
@@ -382,7 +382,7 @@ sparseToDense :: (TensorType t, TensorType tindices, OneOf ((:) * Int32 ((:) * I
 --   <li>NOTE*: <tt>Sub</tt> supports broadcasting. More about broadcasting
 --   <a>here</a></li>
 --   </ul>
-sub :: (TensorType t, OneOf ((:) * (Complex Double) ((:) * (Complex Float) ((:) * Int32 ((:) * Int64 ((:) * Word16 ((:) * Double ((:) * Float ([] *)))))))) t) => Tensor v1 t -> Tensor v2 t -> Tensor Value t
+sub :: OneOf ((:) * (Complex Double) ((:) * (Complex Float) ((:) * Int32 ((:) * Int64 ((:) * Word16 ((:) * Double ((:) * Float ([] *)))))))) t => Tensor v1 t -> Tensor v2 t -> Tensor Value t
 
 -- | Computes the sum of elements across dimensions of a tensor.
 --   
@@ -391,21 +391,17 @@ sub :: (TensorType t, OneOf ((:) * (Complex Double) ((:) * (Complex Float) ((:) 
 --   rank of the tensor is reduced by 1 for each entry in
 --   <tt>reduction_indices</tt>. If <tt>keep_dims</tt> is true, the reduced
 --   dimensions are retained with length 1.
-sum :: (TensorType t, OneOf ((:) * (Complex Double) ((:) * (Complex Float) ((:) * Int16 ((:) * Int32 ((:) * Int64 ((:) * Int8 ((:) * Word16 ((:) * Word8 ((:) * Double ((:) * Float ([] *))))))))))) t, TensorType tidx, OneOf ((:) * Int32 ((:) * Int64 ([] *))) tidx) => Tensor v1 t -> Tensor v2 tidx -> Tensor Value t
+sum :: (OneOf ((:) * (Complex Double) ((:) * (Complex Float) ((:) * Int16 ((:) * Int32 ((:) * Int64 ((:) * Int8 ((:) * Word16 ((:) * Word8 ((:) * Double ((:) * Float ([] *))))))))))) t, OneOf ((:) * Int32 ((:) * Int64 ([] *))) tidx) => Tensor v1 t -> Tensor v2 tidx -> Tensor Value t
 
 -- | Shuffle dimensions of x according to a permutation.
 --   
 --   The output <tt>y</tt> has the same rank as <tt>x</tt>. The shapes of
 --   <tt>x</tt> and <tt>y</tt> satisfy: `y.shape[i] == x.shape[perm[i]] for
 --   i in [0, 1, ..., rank(x) - 1]`
-transpose :: (TensorType t, TensorType tperm, OneOf ((:) * Int32 ((:) * Int64 ([] *))) tperm) => Tensor v1 t -> Tensor v2 tperm -> Tensor Value t
+transpose :: (TensorType t, OneOf ((:) * Int32 ((:) * Int64 ([] *))) tperm) => Tensor v1 t -> Tensor v2 tperm -> Tensor Value t
 truncatedNormal :: TensorType a => Tensor v Int64 -> Build (Tensor Value a)
 
--- | Holds state in the form of a tensor that persists across steps.
---   
---   Outputs a ref to the tensor state so it may be read or modified.
---   TODO(zhifengc/mrry): Adds a pointer to a more detail document about
---   sharing states in tensorflow.
+-- | Use VariableV2 instead.
 variable :: TensorType dtype => Shape -> Build (Tensor Ref dtype)
 
 -- | Create a constant vector.

@@ -59,20 +59,29 @@ tensorType :: TensorType a => a -> DataType
 tensorRefType :: TensorType a => a -> DataType
 tensorVal :: TensorType a => Lens' TensorProto [a]
 
--- | Decode the bytes of a TensorData into a Vector.
-decodeTensorData :: TensorType a => TensorData a -> Vector a
+-- | Tensor data with the correct memory layout for tensorflow.
+newtype TensorData a
+TensorData :: TensorData -> TensorData a
+[unTensorData] :: TensorData a -> TensorData
 
--- | Encode a Vector into a TensorData.
+-- | Types that can be converted to and from <a>TensorData</a>.
+--   
+--   <a>Vector</a> is the most efficient to encode/decode for most element
+--   types.
+class TensorType a => TensorDataType s a
+
+-- | Decode the bytes of a <a>TensorData</a> into an <a>s</a>.
+decodeTensorData :: TensorDataType s a => TensorData a -> s a
+
+-- | Encode an <a>s</a> into a <a>TensorData</a>.
 --   
 --   The values should be in row major order, e.g.,
 --   
 --   element 0: index (0, ..., 0) element 1: index (0, ..., 1) ...
-encodeTensorData :: TensorType a => Shape -> Vector a -> TensorData a
-
--- | Data about a tensor that is encoded for the TensorFlow APIs.
-newtype TensorData a
-TensorData :: TensorData -> TensorData a
-[unTensorData] :: TensorData a -> TensorData
+encodeTensorData :: TensorDataType s a => Shape -> s a -> TensorData a
+newtype Scalar a
+Scalar :: a -> Scalar a
+[unScalar] :: Scalar a -> a
 
 -- | Shape (dimensions) of a tensor.
 newtype Shape
@@ -80,6 +89,64 @@ Shape :: [Int64] -> Shape
 protoShape :: Lens' TensorShapeProto Shape
 class Attribute a
 attrLens :: Attribute a => Lens' AttrValue a
+data DataType :: *
+DT_INVALID :: DataType
+DT_FLOAT :: DataType
+DT_DOUBLE :: DataType
+DT_INT32 :: DataType
+DT_UINT8 :: DataType
+DT_INT16 :: DataType
+DT_INT8 :: DataType
+DT_STRING :: DataType
+DT_COMPLEX64 :: DataType
+DT_INT64 :: DataType
+DT_BOOL :: DataType
+DT_QINT8 :: DataType
+DT_QUINT8 :: DataType
+DT_QINT32 :: DataType
+DT_BFLOAT16 :: DataType
+DT_QINT16 :: DataType
+DT_QUINT16 :: DataType
+DT_UINT16 :: DataType
+DT_COMPLEX128 :: DataType
+DT_HALF :: DataType
+DT_RESOURCE :: DataType
+DT_FLOAT_REF :: DataType
+DT_DOUBLE_REF :: DataType
+DT_INT32_REF :: DataType
+DT_UINT8_REF :: DataType
+DT_INT16_REF :: DataType
+DT_INT8_REF :: DataType
+DT_STRING_REF :: DataType
+DT_COMPLEX64_REF :: DataType
+DT_INT64_REF :: DataType
+DT_BOOL_REF :: DataType
+DT_QINT8_REF :: DataType
+DT_QUINT8_REF :: DataType
+DT_QINT32_REF :: DataType
+DT_BFLOAT16_REF :: DataType
+DT_QINT16_REF :: DataType
+DT_QUINT16_REF :: DataType
+DT_UINT16_REF :: DataType
+DT_COMPLEX128_REF :: DataType
+DT_HALF_REF :: DataType
+DT_RESOURCE_REF :: DataType
+
+-- | A heterogeneous list type.
+data ListOf f as
+Nil :: ListOf f '[]
+(:|) :: f a -> ListOf f as -> ListOf f (a : as)
+type List = ListOf Identity
+
+-- | Equivalent of <a>:|</a> for lists.
+(|:|) :: a -> List as -> List (a : as)
+data TensorTypeProxy a
+TensorTypeProxy :: TensorTypeProxy a
+class TensorTypes (ts :: [*])
+tensorTypes :: TensorTypes ts => TensorTypeList ts
+type TensorTypeList = ListOf TensorTypeProxy
+fromTensorTypeList :: TensorTypeList ts -> [DataType]
+fromTensorTypes :: TensorTypes as => Proxy as -> [DataType]
 
 -- | A <a>Constraint</a> specifying the possible choices of a
 --   <a>TensorType</a>.
@@ -101,16 +168,13 @@ attrLens :: Attribute a => Lens' AttrValue a
 type OneOf ts a = (TensorType a, TensorTypes ts, NoneOf (AllTensorTypes \\ ts) a)
 
 -- | A constraint checking that two types are different.
+type OneOfs ts as = (TensorTypes as, TensorTypes ts, NoneOfs (AllTensorTypes \\ ts) as)
 
 -- | Helper types to produce a reasonable type error message when the
 --   Constraint "a /= a" fails. TODO(judahjacobson): Use ghc-8's
 --   CustomTypeErrors for this.
 data TypeError a
 data ExcludedCase
-
--- | A <a>Constraint</a> checking that the input is a list of
---   <a>TensorType</a>s. Helps improve error messages when using
---   <a>OneOf</a>.
 
 -- | A constraint that the type <tt>a</tt> doesn't appear in the type list
 --   <tt>ts</tt>. Assumes that <tt>a</tt> and each of the elements of
@@ -123,6 +187,16 @@ data ExcludedCase
 -- | An enumeration of all valid <a>TensorType</a>s.
 type AllTensorTypes = '[Float, Double, Int8, Int16, Int32, Int64, Word8, Word16, ByteString, Bool]
 instance GHC.Show.Show TensorFlow.Types.Shape
+instance Data.String.IsString a => Data.String.IsString (TensorFlow.Types.Scalar a)
+instance GHC.Real.RealFrac a => GHC.Real.RealFrac (TensorFlow.Types.Scalar a)
+instance GHC.Float.RealFloat a => GHC.Float.RealFloat (TensorFlow.Types.Scalar a)
+instance GHC.Real.Real a => GHC.Real.Real (TensorFlow.Types.Scalar a)
+instance GHC.Float.Floating a => GHC.Float.Floating (TensorFlow.Types.Scalar a)
+instance GHC.Real.Fractional a => GHC.Real.Fractional (TensorFlow.Types.Scalar a)
+instance GHC.Num.Num a => GHC.Num.Num (TensorFlow.Types.Scalar a)
+instance GHC.Classes.Ord a => GHC.Classes.Ord (TensorFlow.Types.Scalar a)
+instance GHC.Classes.Eq a => GHC.Classes.Eq (TensorFlow.Types.Scalar a)
+instance GHC.Show.Show a => GHC.Show.Show (TensorFlow.Types.Scalar a)
 instance TensorFlow.Types.TensorType GHC.Types.Float
 instance TensorFlow.Types.TensorType GHC.Types.Double
 instance TensorFlow.Types.TensorType GHC.Int.Int32
@@ -135,6 +209,20 @@ instance TensorFlow.Types.TensorType Data.ByteString.Internal.ByteString
 instance TensorFlow.Types.TensorType GHC.Types.Bool
 instance TensorFlow.Types.TensorType (Data.Complex.Complex GHC.Types.Float)
 instance TensorFlow.Types.TensorType (Data.Complex.Complex GHC.Types.Double)
+instance TensorFlow.Types.TensorDataType Data.Vector.Storable.Vector GHC.Types.Float
+instance TensorFlow.Types.TensorDataType Data.Vector.Storable.Vector GHC.Types.Double
+instance TensorFlow.Types.TensorDataType Data.Vector.Storable.Vector GHC.Int.Int8
+instance TensorFlow.Types.TensorDataType Data.Vector.Storable.Vector GHC.Int.Int16
+instance TensorFlow.Types.TensorDataType Data.Vector.Storable.Vector GHC.Int.Int32
+instance TensorFlow.Types.TensorDataType Data.Vector.Storable.Vector GHC.Int.Int64
+instance TensorFlow.Types.TensorDataType Data.Vector.Storable.Vector GHC.Word.Word8
+instance TensorFlow.Types.TensorDataType Data.Vector.Storable.Vector GHC.Word.Word16
+instance TensorFlow.Types.TensorDataType Data.Vector.Storable.Vector GHC.Types.Bool
+instance (Foreign.Storable.Storable a, TensorFlow.Types.TensorDataType Data.Vector.Storable.Vector a) => TensorFlow.Types.TensorDataType Data.Vector.Vector a
+instance TensorFlow.Types.TensorDataType Data.Vector.Vector (Data.Complex.Complex GHC.Types.Float)
+instance TensorFlow.Types.TensorDataType Data.Vector.Vector (Data.Complex.Complex GHC.Types.Double)
+instance TensorFlow.Types.TensorDataType Data.Vector.Vector Data.ByteString.Internal.ByteString
+instance TensorFlow.Types.TensorDataType Data.Vector.Vector a => TensorFlow.Types.TensorDataType TensorFlow.Types.Scalar a
 instance GHC.Exts.IsList TensorFlow.Types.Shape
 instance TensorFlow.Types.Attribute GHC.Types.Float
 instance TensorFlow.Types.Attribute Data.ByteString.Internal.ByteString
@@ -146,6 +234,10 @@ instance TensorFlow.Types.Attribute TensorFlow.Types.Shape
 instance TensorFlow.Types.Attribute Proto.Tensorflow.Core.Framework.AttrValue.AttrValue'ListValue
 instance TensorFlow.Types.Attribute [Proto.Tensorflow.Core.Framework.Types.DataType]
 instance TensorFlow.Types.Attribute [GHC.Int.Int64]
+instance TensorFlow.Types.All GHC.Classes.Eq (TensorFlow.Types.Map f as) => GHC.Classes.Eq (TensorFlow.Types.ListOf f as)
+instance TensorFlow.Types.All GHC.Show.Show (TensorFlow.Types.Map f as) => GHC.Show.Show (TensorFlow.Types.ListOf f as)
+instance TensorFlow.Types.TensorTypes '[]
+instance (TensorFlow.Types.TensorType t, TensorFlow.Types.TensorTypes ts) => TensorFlow.Types.TensorTypes (t : ts)
 
 module TensorFlow.Output
 
@@ -221,10 +313,9 @@ ExplicitName :: !Text -> PendingNodeName
 ImplicitName :: PendingNodeName
 
 -- | Opaque handle to a mutable resource in the graph. Typical such
---   resources are variables. The type parameter corresponds to the dtype
---   of the tensor held in the variable.
-newtype ResourceHandle a
-ResourceHandle :: Output -> ResourceHandle a
+--   resources are variables.
+newtype ResourceHandle
+ResourceHandle :: Output -> ResourceHandle
 instance GHC.Classes.Ord TensorFlow.Output.Op
 instance GHC.Classes.Eq TensorFlow.Output.Op
 instance GHC.Show.Show TensorFlow.Output.Output
@@ -305,6 +396,8 @@ feed :: Tensor v a -> TensorData a -> Feed
 --   nodes in a <tt>GraphDef</tt> that was loaded via <tt>addGraphDef</tt>.
 --   TODO(judahjacobson): add more safety checks here.
 tensorFromName :: TensorKind v -> Text -> Tensor v a
+type TensorList v = ListOf (Tensor v)
+tensorListOutputs :: TensorList v as -> [Output]
 
 module TensorFlow.Build
 
@@ -416,6 +509,9 @@ type SummaryTensor = Tensor Value ByteString
 --   happens once, but if <a>buildWithSummary</a> is used repeatedly, the
 --   values accumulate.
 collectAllSummaries :: Monad m => BuildT m [SummaryTensor]
+instance Control.Monad.Catch.MonadMask m => Control.Monad.Catch.MonadMask (TensorFlow.Build.BuildT m)
+instance Control.Monad.Catch.MonadCatch m => Control.Monad.Catch.MonadCatch (TensorFlow.Build.BuildT m)
+instance Control.Monad.Catch.MonadThrow m => Control.Monad.Catch.MonadThrow (TensorFlow.Build.BuildT m)
 instance GHC.Base.Monad m => Control.Monad.State.Class.MonadState TensorFlow.Build.GraphState (TensorFlow.Build.BuildT m)
 instance Control.Monad.Trans.Class.MonadTrans TensorFlow.Build.BuildT
 instance Control.Monad.IO.Class.MonadIO m => Control.Monad.IO.Class.MonadIO (TensorFlow.Build.BuildT m)
@@ -456,15 +552,19 @@ instance (TensorFlow.BuildOp.OpResult a1, TensorFlow.BuildOp.OpResult a2, Tensor
 instance (TensorFlow.BuildOp.OpResult a1, TensorFlow.BuildOp.OpResult a2, TensorFlow.BuildOp.OpResult a3, TensorFlow.BuildOp.OpResult a4) => TensorFlow.BuildOp.OpResult (a1, a2, a3, a4)
 instance (TensorFlow.BuildOp.OpResult a1, TensorFlow.BuildOp.OpResult a2, TensorFlow.BuildOp.OpResult a3, TensorFlow.BuildOp.OpResult a4, TensorFlow.BuildOp.OpResult a5) => TensorFlow.BuildOp.OpResult (a1, a2, a3, a4, a5)
 instance (TensorFlow.BuildOp.OpResult a1, TensorFlow.BuildOp.OpResult a2, TensorFlow.BuildOp.OpResult a3, TensorFlow.BuildOp.OpResult a4, TensorFlow.BuildOp.OpResult a5, TensorFlow.BuildOp.OpResult a6) => TensorFlow.BuildOp.OpResult (a1, a2, a3, a4, a5, a6)
-instance TensorFlow.BuildOp.OpResult (TensorFlow.Output.ResourceHandle a)
+instance TensorFlow.BuildOp.OpResult TensorFlow.Output.ResourceHandle
 instance TensorFlow.BuildOp.OpResult (TensorFlow.Tensor.Tensor TensorFlow.Tensor.Value a)
 instance TensorFlow.BuildOp.OpResult (TensorFlow.Tensor.Tensor TensorFlow.Tensor.Ref a)
 instance TensorFlow.BuildOp.OpResult TensorFlow.Output.ControlNode
+instance TensorFlow.Types.TensorTypes as => TensorFlow.BuildOp.OpResult (TensorFlow.Tensor.TensorList TensorFlow.Tensor.Value as)
+instance TensorFlow.Types.TensorTypes as => TensorFlow.BuildOp.OpResult (TensorFlow.Tensor.TensorList TensorFlow.Tensor.Ref as)
 instance TensorFlow.BuildOp.OpResult a => TensorFlow.BuildOp.OpResult [a]
 instance TensorFlow.BuildOp.BuildOp TensorFlow.Output.ControlNode
-instance TensorFlow.BuildOp.BuildOp (TensorFlow.Output.ResourceHandle a)
+instance TensorFlow.BuildOp.BuildOp TensorFlow.Output.ResourceHandle
 instance TensorFlow.BuildOp.BuildOp (TensorFlow.Tensor.Tensor TensorFlow.Tensor.Value a)
 instance TensorFlow.BuildOp.BuildOp (TensorFlow.Tensor.Tensor TensorFlow.Tensor.Ref a)
+instance TensorFlow.Types.TensorTypes as => TensorFlow.BuildOp.BuildOp (TensorFlow.Tensor.TensorList TensorFlow.Tensor.Value as)
+instance TensorFlow.Types.TensorTypes as => TensorFlow.BuildOp.BuildOp (TensorFlow.Tensor.TensorList TensorFlow.Tensor.Ref as)
 instance TensorFlow.BuildOp.BuildOp [TensorFlow.Tensor.Tensor TensorFlow.Tensor.Value a]
 instance (TensorFlow.BuildOp.OpResult t1, TensorFlow.BuildOp.OpResult t2) => TensorFlow.BuildOp.BuildOp (t1, t2)
 instance (TensorFlow.BuildOp.OpResult t1, TensorFlow.BuildOp.OpResult t2, TensorFlow.BuildOp.OpResult t3) => TensorFlow.BuildOp.BuildOp (t1, t2, t3)
@@ -472,9 +572,10 @@ instance (TensorFlow.BuildOp.OpResult t1, TensorFlow.BuildOp.OpResult t2, Tensor
 instance (TensorFlow.BuildOp.OpResult t1, TensorFlow.BuildOp.OpResult t2, TensorFlow.BuildOp.OpResult t3, TensorFlow.BuildOp.OpResult t4, TensorFlow.BuildOp.OpResult t5) => TensorFlow.BuildOp.BuildOp (t1, t2, t3, t4, t5)
 instance (TensorFlow.BuildOp.OpResult t1, TensorFlow.BuildOp.OpResult t2, TensorFlow.BuildOp.OpResult t3, TensorFlow.BuildOp.OpResult t4, TensorFlow.BuildOp.OpResult t5, TensorFlow.BuildOp.OpResult t6) => TensorFlow.BuildOp.BuildOp (t1, t2, t3, t4, t5, t6)
 instance TensorFlow.BuildOp.OpResult a => TensorFlow.BuildOp.BuildOp (TensorFlow.Build.Build a)
-instance TensorFlow.BuildOp.BuildOp f => TensorFlow.BuildOp.BuildOp (TensorFlow.Output.ResourceHandle a -> f)
+instance TensorFlow.BuildOp.BuildOp f => TensorFlow.BuildOp.BuildOp (TensorFlow.Output.ResourceHandle -> f)
 instance TensorFlow.BuildOp.BuildOp f => TensorFlow.BuildOp.BuildOp (TensorFlow.Tensor.Tensor v a -> f)
 instance TensorFlow.BuildOp.BuildOp f => TensorFlow.BuildOp.BuildOp ([TensorFlow.Tensor.Tensor v a] -> f)
+instance TensorFlow.BuildOp.BuildOp f => TensorFlow.BuildOp.BuildOp (TensorFlow.Tensor.TensorList v as -> f)
 
 module TensorFlow.Nodes
 
@@ -500,21 +601,7 @@ Fetch :: Set Text -> (Map Text TensorData -> a) -> Fetch a
 -- | Function to create an <tt>a</tt> from the fetched data.
 [fetchRestore] :: Fetch a -> Map Text TensorData -> a
 nodesUnion :: (Monoid b, Traversable t, Applicative f) => t (f b) -> f b
-fetchTensorList :: TensorType a => Tensor v a -> Build (Fetch (Shape, [a]))
-fetchTensorVector :: TensorType a => Tensor v a -> Build (Fetch (Shape, Vector a))
-newtype Scalar a
-Scalar :: a -> Scalar a
-[unScalar] :: Scalar a -> a
-instance Data.String.IsString a => Data.String.IsString (TensorFlow.Nodes.Scalar a)
-instance GHC.Real.RealFrac a => GHC.Real.RealFrac (TensorFlow.Nodes.Scalar a)
-instance GHC.Float.RealFloat a => GHC.Float.RealFloat (TensorFlow.Nodes.Scalar a)
-instance GHC.Real.Real a => GHC.Real.Real (TensorFlow.Nodes.Scalar a)
-instance GHC.Float.Floating a => GHC.Float.Floating (TensorFlow.Nodes.Scalar a)
-instance GHC.Real.Fractional a => GHC.Real.Fractional (TensorFlow.Nodes.Scalar a)
-instance GHC.Num.Num a => GHC.Num.Num (TensorFlow.Nodes.Scalar a)
-instance GHC.Classes.Ord a => GHC.Classes.Ord (TensorFlow.Nodes.Scalar a)
-instance GHC.Classes.Eq a => GHC.Classes.Eq (TensorFlow.Nodes.Scalar a)
-instance GHC.Show.Show a => GHC.Show.Show (TensorFlow.Nodes.Scalar a)
+fetchTensorVector :: TensorType a => Tensor v a -> Build (Fetch (TensorData a))
 instance GHC.Base.Functor TensorFlow.Nodes.Fetch
 instance GHC.Base.Applicative TensorFlow.Nodes.Fetch
 instance (TensorFlow.Nodes.Nodes t1, TensorFlow.Nodes.Nodes t2) => TensorFlow.Nodes.Nodes (t1, t2)
@@ -525,9 +612,13 @@ instance TensorFlow.Nodes.Nodes t => TensorFlow.Nodes.Nodes [t]
 instance TensorFlow.Nodes.Fetchable t a => TensorFlow.Nodes.Fetchable [t] [a]
 instance TensorFlow.Nodes.Nodes TensorFlow.Output.ControlNode
 instance (a ~ ()) => TensorFlow.Nodes.Fetchable TensorFlow.Output.ControlNode a
+instance TensorFlow.Nodes.Nodes (TensorFlow.Types.ListOf f '[])
+instance (TensorFlow.Nodes.Nodes (f a), TensorFlow.Nodes.Nodes (TensorFlow.Types.ListOf f as)) => TensorFlow.Nodes.Nodes (TensorFlow.Types.ListOf f (a : as))
+instance (l ~ TensorFlow.Types.List '[]) => TensorFlow.Nodes.Fetchable (TensorFlow.Types.ListOf f '[]) l
+instance (TensorFlow.Nodes.Fetchable (f t) a, TensorFlow.Nodes.Fetchable (TensorFlow.Types.ListOf f ts) (TensorFlow.Types.List as), i ~ Data.Functor.Identity.Identity) => TensorFlow.Nodes.Fetchable (TensorFlow.Types.ListOf f (t : ts)) (TensorFlow.Types.ListOf i (a : as))
 instance TensorFlow.Nodes.Nodes (TensorFlow.Tensor.Tensor v a)
-instance (TensorFlow.Types.TensorType a, a ~ a') => TensorFlow.Nodes.Fetchable (TensorFlow.Tensor.Tensor v a) (Data.Vector.Vector a')
-instance (TensorFlow.Types.TensorType a, a ~ a') => TensorFlow.Nodes.Fetchable (TensorFlow.Tensor.Tensor v a) (TensorFlow.Nodes.Scalar a')
+instance (TensorFlow.Types.TensorType a, a ~ a') => TensorFlow.Nodes.Fetchable (TensorFlow.Tensor.Tensor v a) (TensorFlow.Types.TensorData a')
+instance (TensorFlow.Types.TensorType a, TensorFlow.Types.TensorDataType s a, a ~ a') => TensorFlow.Nodes.Fetchable (TensorFlow.Tensor.Tensor v a) (s a')
 
 module TensorFlow.ControlFlow
 
@@ -593,11 +684,6 @@ build :: Build a -> Session a
 --   </pre>
 buildAnd :: (a -> Session b) -> Build a -> Session b
 
--- | Lift a <a>Build</a> action into a <a>Session</a>, including any
---   explicit op renderings. Returns the merged summary ops which can be
---   used for logging, see <a>build</a> for a convenient wrapper.
-buildWithSummary :: Build a -> Session (a, [SummaryTensor])
-
 -- | Add all pending rendered nodes to the TensorFlow graph and runs any
 --   pending initializers.
 --   
@@ -630,6 +716,9 @@ runWithFeeds_ :: Nodes t => [Feed] -> t -> Session ()
 --   until runSession exits or an exception occurs. Graph extension happens
 --   synchronously, but the resultant run proceeds as a separate thread.
 asyncProdNodes :: Nodes t => t -> Session ()
+instance Control.Monad.Catch.MonadMask TensorFlow.Session.Session
+instance Control.Monad.Catch.MonadCatch TensorFlow.Session.Session
+instance Control.Monad.Catch.MonadThrow TensorFlow.Session.Session
 instance Control.Monad.IO.Class.MonadIO TensorFlow.Session.Session
 instance GHC.Base.Monad TensorFlow.Session.Session
 instance GHC.Base.Applicative TensorFlow.Session.Session
@@ -681,19 +770,11 @@ build :: Build a -> Session a
 --   </pre>
 buildAnd :: (a -> Session b) -> Build a -> Session b
 
--- | Lift a <a>Build</a> action into a <a>Session</a>, including any
---   explicit op renderings. Returns the merged summary ops which can be
---   used for logging, see <a>build</a> for a convenient wrapper.
-buildWithSummary :: Build a -> Session (a, [SummaryTensor])
-
 -- | Types that tensor representations (e.g. <a>Tensor</a>,
 --   <a>ControlNode</a>) can be fetched into.
 --   
 --   Includes collections of tensors (e.g. tuples).
 class Nodes t => Fetchable t a
-newtype Scalar a
-Scalar :: a -> Scalar a
-[unScalar] :: Scalar a -> a
 
 -- | Types that contain ops which can be run.
 class Nodes t
@@ -795,21 +876,30 @@ value :: Tensor v a -> Tensor Value a
 --   TODO(judahjacobson): add more safety checks here.
 tensorFromName :: TensorKind v -> Text -> Tensor v a
 
--- | Data about a tensor that is encoded for the TensorFlow APIs.
-data TensorData a
-
 -- | The class of scalar types supported by tensorflow.
 class TensorType a
 
--- | Decode the bytes of a TensorData into a Vector.
-decodeTensorData :: TensorType a => TensorData a -> Vector a
+-- | Tensor data with the correct memory layout for tensorflow.
+data TensorData a
 
--- | Encode a Vector into a TensorData.
+-- | Types that can be converted to and from <a>TensorData</a>.
+--   
+--   <a>Vector</a> is the most efficient to encode/decode for most element
+--   types.
+class TensorType a => TensorDataType s a
+
+-- | Decode the bytes of a <a>TensorData</a> into an <a>s</a>.
+decodeTensorData :: TensorDataType s a => TensorData a -> s a
+
+-- | Encode an <a>s</a> into a <a>TensorData</a>.
 --   
 --   The values should be in row major order, e.g.,
 --   
 --   element 0: index (0, ..., 0) element 1: index (0, ..., 1) ...
-encodeTensorData :: TensorType a => Shape -> Vector a -> TensorData a
+encodeTensorData :: TensorDataType s a => Shape -> s a -> TensorData a
+newtype Scalar a
+Scalar :: a -> Scalar a
+[unScalar] :: Scalar a -> a
 
 -- | Shape (dimensions) of a tensor.
 newtype Shape
