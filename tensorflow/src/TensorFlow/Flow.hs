@@ -123,3 +123,11 @@ liftF2 f (Flow g) (Flow h) = Flow $ do
     (y , deps'') <- lift $ runStateT h deps
     put $ deps' <> deps''
     return $ f x y
+
+-- TODO:
+-- Fetch values
+-- gradients: how, when things aren't fixed?
+-- Automatic codegen?  Change MonadBuild?
+-- devices and name scopes?
+-- how do loops work in this scheme?
+--   maybe: defer :: Flow s a -> Session (Flow s ())
