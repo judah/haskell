@@ -89,6 +89,9 @@ instance Nodes t => Nodes [t] where
 instance Fetchable t a => Fetchable [t] [a] where
     getFetch ts  = sequenceA <$> mapM getFetch ts
 
+instance Nodes ResourceHandle where
+    getNodes (ResourceHandle o) = Set.singleton <$> getOrAddOp (o ^. outputOp)
+
 instance Nodes ControlNode where
     getNodes (ControlNode o) = Set.singleton <$> getOrAddOp o
 

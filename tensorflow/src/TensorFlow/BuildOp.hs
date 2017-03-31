@@ -18,8 +18,8 @@
 {-# LANGUAGE TupleSections #-}
 
 module TensorFlow.BuildOp
-    ( OpResult
-    , BuildOp
+    ( OpResult(..)
+    , BuildOp(..)
     , buildOp
     , buildListOp
     , eqLengthGuard

@@ -19,6 +19,7 @@ library
                   , TensorFlow.Core
                   , TensorFlow.Internal.FFI
                   , TensorFlow.Internal.VarInt
+                  , TensorFlow.Flow
                   , TensorFlow.Nodes
                   , TensorFlow.Output
                   , TensorFlow.Session
