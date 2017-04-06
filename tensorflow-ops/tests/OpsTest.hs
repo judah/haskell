@@ -55,18 +55,17 @@ testSaveRestore :: Test
 testSaveRestore = testCase "testSaveRestore" $
     withSystemTempDirectory "" $ \dirPath -> do
         let path = B8.pack $ dirPath ++ "/checkpoint"
-            var :: TF.MonadBuild m => m (TF.Tensor TF.Ref Float)
-            var = TF.render =<<
-                  TF.zeroInitializedVariable' (TF.opName .~ "a")
+            var :: TF.MonadBuild m => m (TF.Variable Float)
+            var = TF.zeroInitializedVariable' (TF.opName .~ "a")
                                         (TF.Shape [])
         TF.runSession $ do
             v <- var
             TF.assign v 134 >>= TF.run_
-            TF.save path [v] >>= TF.run_
+            TF.save path [TF.readVar v] >>= TF.run_
         result <- TF.runSession $ do
             v <- var
             TF.restore path v >>= TF.run_
-            TF.run v
+            TF.run (TF.readVar v)
         liftIO $ TF.Scalar 134 @=? result
 
 -- | Test that 'placeholder' is not CSE'd.

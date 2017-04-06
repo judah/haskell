@@ -20,6 +20,7 @@ module Main where
 
 import Control.Monad.IO.Class (liftIO)
 import Lens.Family2 ((^.), (.~))
+import Data.Int (Int64)
 import Data.List (sort)
 import Proto.Tensorflow.Core.Framework.Graph
     ( node )
@@ -46,8 +47,11 @@ import TensorFlow.Ops
     , assign
     , constant
     , initializedVariable
+    , readVar
+    , scalar
     , variable
     , variable'
+    , Variable(..)
     )
 import TensorFlow.Output (Device(..))
 import TensorFlow.Tensor (Tensor, Value, Ref)
@@ -65,11 +69,10 @@ import qualified Data.Vector as V
 -- | Test 'opName' behavior.
 testOpName :: Test
 testOpName = testCase "testOpName" $ do
-    let graph = variable' (opName .~ "foo") []
-                    >>= render :: Build (Tensor Ref Float)
+    let graph = variable' (opName .~ "foo") [] :: Build (Variable Float)
         nodeDef :: NodeDef
         nodeDef = head $ asGraphDef graph ^. node
-    "Variable" @=? (nodeDef ^. op)
+    "VarHandleOp" @=? (nodeDef ^. op)
     "foo" @=? (nodeDef ^. name)
 
 -- | Test that "run" will render and extend any pure ops that haven't already
@@ -86,7 +89,7 @@ testInitializedVariable =
         (formula, reset) <- do
             v <- initializedVariable 42
             r <- assign v 24
-            return (1 `add` v, r)
+            return (1 + readVar v, r)
         result <- run formula
         liftIO $ 43 @=? (unScalar result :: Float)
         run_ reset  -- Updates v to a different value
@@ -97,27 +100,26 @@ testInitializedVariableShape :: Test
 testInitializedVariableShape =
     testCase "testInitializedVariableShape" $ runSession $ do
         vector <- initializedVariable (constant [1] [42 :: Float])
-        result <- run vector
+        result <- run (readVar vector)
         liftIO $ [42] @=? (result :: V.Vector Float)
 
 -- | Test nameScoped behavior.
 testNameScoped :: Test
 testNameScoped = testCase "testNameScoped" $ do
-    let graph = withNameScope "foo" $ variable [] :: Build (Tensor Ref Float)
+    let graph = withNameScope "foo" $ variable [] :: Build (Variable Float)
         nodeDef :: NodeDef
         [nodeDef] = asGraphDef graph ^. node
-    "foo/Variable_0" @=? (nodeDef ^. name)  -- TODO: Check prefix.
-    "Variable" @=? (nodeDef ^. op)
+    "foo/VarHandleOp_0" @=? (nodeDef ^. name)  -- TODO: Check prefix.
+    "VarHandleOp" @=? (nodeDef ^. op)
 
 -- | Test combined opName and nameScoped behavior.
 testNamedAndScoped :: Test
 testNamedAndScoped = testCase "testNamedAndScoped" $ do
-    let graph :: Build (Tensor Ref Float)
+    let graph :: Build (Variable Float)
         graph = withNameScope "foo1" (variable' (opName .~ "bar1") [])
-                    >>= render
         nodeDef :: NodeDef
         nodeDef = head $ asGraphDef graph ^. node
-    "Variable" @=? (nodeDef ^. op)
+    "VarHandleOp" @=? (nodeDef ^. op)
     "foo1/bar1" @=? (nodeDef ^. name)
 
 -- | Flush the node buffer and sort the nodes by name (for more stable tests).
@@ -129,20 +131,21 @@ testRenderDedup :: Test
 testRenderDedup = testCase "testRenderDedup" $ evalBuildT $ do
    renderNodes
    names <- flushed (^. name)
-   liftIO $ ["Const_1", "Variable_0", "Variable_2"] @=? names
+   liftIO $ ["Const_1", "VarHandleOp_0", "VarHandleOp_2"] @=? names
    -- Render the nodes in a different scope, which should cause them
    -- to be distinct from the previous ones.
    withNameScope "foo" renderNodes
    scopedNames <- flushed (^. name)
-   liftIO $ ["foo/Const_4", "foo/Variable_3", "foo/Variable_5"] @=? scopedNames
+   liftIO $ ["foo/Const_4", "foo/VarHandleOp_3", "foo/VarHandleOp_5"]
+                @=? scopedNames
   where
     renderNodes = do
         -- A stateful op and a pure op.
-        _ :: Tensor Ref Float <- variable []
+        _ :: Variable Float <- variable []
         _ :: Tensor Value Float <- render 3
         -- Another stateful op, and a pure op which should be
         -- deduped with the previous one.
-        _ :: Tensor Ref Float <- variable []
+        _ :: Variable Float <- variable []
         _ :: Tensor Value Float <- render 3
         return ()
 
@@ -151,16 +154,37 @@ testDeviceColocation :: Test
 testDeviceColocation = testCase "testDeviceColocation" $ evalBuildT $ do
    renderNodes
    devices <- flushed (\x -> (x ^. name, x ^. device))
-   liftIO $ [ ("Add_2","dev0")
+   liftIO $ [ ("Add_3","dev0")
             , ("Const_1","dev0")
-            , ("Variable_0","dev0")] @=? devices
+            , ("ReadVariableOp_2","dev0")
+            , ("VarHandleOp_0","dev0")] @=? devices
   where
     renderNodes = do
         -- A stateful op and a pure op.
-        var :: Tensor Ref Float <- withDevice (Just $ Device "dev0") $ variable []
+        var :: Variable Float <- withDevice (Just $ Device "dev0") $ variable []
         -- Uses render to cause the expression be added to the graph.
-        _ <- colocateWith var $ render $ 3 `add` var
+        _ <- colocateWith (varHandle var) $ render $ 3 + readVar var
         return ()
+
+-- | See https://github.com/tensorflow/haskell/issues/92.
+-- Even though we're not explicitly evaluating `f0` until the end,
+-- it should hold the earlier value of the variable.
+testRereadRef :: Test
+testRereadRef = testCase "testReRunAssign" $ runSession $ do
+    w <- initializedVariable 0
+    f0 <- run (readVar w)
+    run_ =<< assign w (scalar (0.1::Float))
+    f1 <- run (readVar w)
+    liftIO $ (0.0, 0.1) @=? (unScalar f0, unScalar f1)
+
+testMultipleInitialized :: Test
+testMultipleInitialized = testCase "testMultipleInitialized"
+                            $ runSession $ do
+    w <- initializedVariable (2 :: Tensor Value Int64)
+    v <- initializedVariable (3 :: Tensor Value Int64)
+    (w', v') <- run (readVar w, readVar v)
+    liftIO $ (2, 3) @=? (unScalar w', unScalar v')
+
 
 main :: IO ()
 main = googleTest [ testInitializedVariable
@@ -171,4 +195,6 @@ main = googleTest [ testInitializedVariable
                   , testNamedAndScoped
                   , testPureRender
                   , testRenderDedup
+                  , testRereadRef
+                  , testMultipleInitialized
                   ]

@@ -37,6 +37,8 @@ Test-Suite RegressionTest
   hs-source-dirs: tests
   build-depends: base
                , HUnit
+               , lens-family
+               , transformers
                , random
                , tensorflow
                , tensorflow-core-ops

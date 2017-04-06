@@ -660,6 +660,7 @@ opGrad "ZerosLike" _ _ _ = [Nothing]
 -- TODO(fmayle): These can go away if we properly prune the graph.
 opGrad "Const" _ _ _ = [Nothing, Nothing]
 opGrad "Placeholder" _ _ _ = []
+opGrad "ReadVariableOp" _ _ _ = [Nothing]
 opGrad "Variable" _ _ _ = []
 
 opGrad n nodeDef ins grads =
@@ -693,6 +694,7 @@ numOutputs o =
         "Neg" -> 1
         "Placeholder" -> 1
         "OneHot" -> 1
+        "ReadVariableOp" -> 1
         "RefIdentity" -> 1
         "Relu" -> 1
         "Reshape" -> 1

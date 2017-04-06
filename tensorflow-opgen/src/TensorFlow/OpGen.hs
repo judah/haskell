@@ -33,15 +33,14 @@ where:
  (for example: 'TensorType' or 'OneOf').
 
 * @{input tensors}@ is of the form @T_1 -> ... -> T_N@, where each @T@ is of
-the form @Tensor Ref a@, @Tensor v a@ or @ResourceHandle@ (or a list of one
-of those types), and @a@ is either a concrete type or a (constrained) type
-variable.
+the form @Tensor Ref a@ or @Tensor v a@ (or a list of one of those types),
+and @a@ is either a concrete type or a (constrained) type variable.
 
 * @{output tensors}@ is of the form @(T_1,...,T_N)@ for "pure" ops, and
 @Build (T_1,...,T_N)@ for "stateful" ops.  An op is considered "stateful" if
-it takes a @Tensor Ref@ or @ResourceHandle@ as input, or if it's explicitly
-marked \"Stateful\" in its @REGISTER_OP@ definition.  (If there are no outputs,
-it is either @ControlNode@ or @Build ControlNode@.)
+it takes a @Tensor Ref@ or @Tensor v ResourceHandle@ as input, or if it's
+explicitly marked \"Stateful\" in its @REGISTER_OP@ definition.  (If there
+are no outputs, it is either @ControlNode@ or @Build ControlNode@.)
 -}
 
 module TensorFlow.OpGen
@@ -153,7 +152,6 @@ imports = stack [
     , "import Lens.Family2 ((.~), (&))"
     , "import TensorFlow.Build"
     , "import TensorFlow.BuildOp"
-    , "import TensorFlow.Output (ResourceHandle)"
     , "import TensorFlow.Tensor"
     , "import TensorFlow.Types"
     ]
@@ -296,7 +294,7 @@ typeSig pre pOp = constraints
         | null classConstraints = empty
         | otherwise = "forall" <+> sep typeParams <+> "." <+> tuple classConstraints <+> "=>"
     typeParams = [strictText v | k <- parsedInputs pOp ++ parsedOutputs pOp,
-                  Just (ArgTensorEither v) <- [argKind $ parsedArgCase k]]
+                  ArgTensorEither v <- [argKind $ parsedArgCase k]]
                 ++ [renderHaskellAttrName n | n <- inferredTypeAttrs pOp]
                 ++ if parsedOpIsMonadic pOp then ["m'"] else []
     -- Use m' as the type parameter to avoid clashing with an attribute name.
@@ -329,13 +327,12 @@ typeSig pre pOp = constraints
         | otherwise = o
         
 -- | Render an op input or output.
--- For example: "Tensor Ref Int64", "Tensor v t", "ResourceHandle"
+-- For example: "Tensor Ref Int64", "Tensor v t"
 tensorArg :: ParsedArg -> Doc
 tensorArg p = case parsedArgCase p of
-    ResourceArg -> "ResourceHandle"
-    SimpleArg { argType = t, argCaseKind = k } -> tensorType t k
-    ListArg { argType = t, argCaseKind = k } -> brackets $ tensorType t k
-    MixedListArg {argTypeAttr = t, argCaseKind = k}
+    SimpleArg { argType = t, argKind = k } -> tensorType t k
+    ListArg { argType = t, argKind = k } -> brackets $ tensorType t k
+    MixedListArg {argTypeAttr = t, argKind = k}
         -> "TensorList" <+> kind k <+> renderHaskellName t
   where
     kind k = case k of
@@ -415,8 +412,7 @@ dtTypeToHaskell DT_STRING = "Data.ByteString.ByteString"
 dtTypeToHaskell DT_UINT16 = "Data.Word.Word16"
 dtTypeToHaskell DT_HALF = "Data.Word.Word16"  -- TODO(gnezdo): make unique
 dtTypeToHaskell DT_UINT8 = "Data.Word.Word8"
-dtTypeToHaskell DT_RESOURCE =
-    error "ResourceHandle must be prevented from getting here."
+dtTypeToHaskell DT_RESOURCE = "ResourceHandle"
 dtTypeToHaskell x =
     Text.pack $ "Unsupported type in dtTypeToHaskell: " ++ show x
 

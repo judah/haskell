@@ -1,11 +1,13 @@
+{-# LANGUAGE OverloadedStrings #-}
 -- | Simple linear regression example for the README.
 
 import Control.Monad (replicateM, replicateM_, zipWithM)
+import Control.Monad.IO.Class
+import Lens.Family2 ((.~))
 import System.Random (randomIO)
 import Test.HUnit (assertBool)
 
 import qualified TensorFlow.Core as TF
-import qualified TensorFlow.GenOps.Core as TF
 import qualified TensorFlow.Gradient as TF
 import qualified TensorFlow.Ops as TF
 
@@ -25,23 +27,25 @@ fit xData yData = TF.runSession $ do
     let x = TF.vector xData
         y = TF.vector yData
     -- Create scalar variables for slope and intercept.
-    w <- TF.initializedVariable 0
-    b <- TF.initializedVariable 0
+    w <- TF.initializedVariable' (TF.opName .~ "w") 0
+    b <- TF.initializedVariable' (TF.opName .~ "b") 8
+
     -- Define the loss function.
-    let yHat = (x `TF.mul` w) `TF.add` b
-        loss = TF.square (yHat `TF.sub` y)
+    let yHat = x * TF.readVar w + TF.readVar b
+        loss = TF.square (yHat - y)
     -- Optimize with gradient descent.
     trainStep <- gradientDescent 0.001 loss [w, b]
     replicateM_ 1000 (TF.run trainStep)
     -- Return the learned parameters.
-    (TF.Scalar w', TF.Scalar b') <- TF.run (w, b)
+    (TF.Scalar w', TF.Scalar b') <- TF.run (TF.readVar w, TF.readVar b)
     return (w', b')
 
 gradientDescent :: Float
                 -> TF.Tensor TF.Value Float
-                -> [TF.Tensor TF.Ref Float]
+                -> [TF.Variable Float]
                 -> TF.Session TF.ControlNode
 gradientDescent alpha loss params = do
     let applyGrad param grad =
-            TF.assign param (param `TF.sub` (TF.scalar alpha `TF.mul` grad))
-    TF.group =<< zipWithM applyGrad params =<< TF.gradients loss params
+            TF.assign param (TF.readVar param - TF.scalar alpha * grad)
+    TF.group =<< zipWithM applyGrad params
+        =<< TF.gradients loss (map TF.readVar params)

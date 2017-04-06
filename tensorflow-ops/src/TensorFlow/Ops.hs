@@ -15,7 +15,7 @@
 -- | This module contains definitions for some built-in TensorFlow operations.
 --
 -- Note that certain, "stateful" ops like 'variable' and 'assign' return a
--- 'Build' action (e.g., @Build (Tensor Ref a)@ instead of a pure value; the
+-- 'Build' action (e.g., @Build (Variable a)@ instead of a pure value; the
 -- returned 'Tensor's are always rendered in the current 'Build' context.  This
 -- approach helps us avoid problems with inlining or common subexpression
 -- elimination, by writing
@@ -65,8 +65,6 @@ module TensorFlow.Ops
     , CoreOps.addN'
     , CoreOps.argMax
     , CoreOps.argMax'
-    , CoreOps.assign
-    , CoreOps.assign'
     , CoreOps.broadcastGradientArgs
     , CoreOps.broadcastGradientArgs'
     , CoreOps.cast
@@ -79,10 +77,6 @@ module TensorFlow.Ops
     , CoreOps.equal'
     , expandDims
     , expandDims'
-    , initializedVariable
-    , initializedVariable'
-    , zeroInitializedVariable
-    , zeroInitializedVariable'
     , CoreOps.fill
     , CoreOps.fill'
     , CoreOps.identity
@@ -129,6 +123,8 @@ module TensorFlow.Ops
     , CoreOps.softmaxCrossEntropyWithLogits'
     , CoreOps.sparseToDense
     , CoreOps.sparseToDense'
+    , CoreOps.square
+    , CoreOps.square'
     , CoreOps.sub
     , CoreOps.sub'
     , CoreOps.sum
@@ -137,14 +133,26 @@ module TensorFlow.Ops
     , CoreOps.transpose'
     , truncatedNormal
     , truncatedNormal'
-    , CoreOps.variable
-    , CoreOps.variable'
     , vector
     , vector'
     , zeros
     , CoreOps.zerosLike
     , CoreOps.zerosLike'
     , scalarize
+    -- * Variables
+    , Variable(..)
+    , assign
+    , assign'
+    , assignAdd
+    , assignAdd'
+    , initializedVariable
+    , initializedVariable'
+    , readVar
+    , readVar'
+    , variable
+    , variable'
+    , zeroInitializedVariable
+    , zeroInitializedVariable'
     ) where
 
 import Data.ByteString (ByteString)
@@ -213,31 +221,68 @@ placeholder' params pShape
                 & opAttr "shape" .~ pShape
                 & params
 
+newtype Variable a = Variable {varHandle :: Tensor Value ResourceHandle}
+
+variable :: (MonadBuild m, TensorType a) => Shape -> m (Variable a)
+variable = variable' id
+
+variable' :: forall m a . (MonadBuild m, TensorType a)
+                    => OpParams -> Shape -> m (Variable a)
+variable' params s = do
+    -- TODO: make this depend on the pending op name in OpParams.
+    -- May be easier with the Tensor Value/Build stuff.
+    n <- build $ uniqueName "Var"
+    Variable <$> CoreOps.varHandleOp' (params . (opAttr "shared_name" .~
+                                                    encodeUtf8 n))
+                                    (tensorType (undefined :: a)) s
+
 -- | Creates a variable initialized to the given value.
 -- Initialization happens next time session runs.
 initializedVariable :: (MonadBuild m, TensorType a)
-                    => Tensor Value a -> m (Tensor Ref a)
+                    => Tensor Value a -> m (Variable a)
 initializedVariable = initializedVariable' id
 
-initializedVariable' :: (MonadBuild m, TensorType a)
-                    => OpParams -> Tensor Value a -> m (Tensor Ref a)
+initializedVariable' :: forall a m v . (MonadBuild m, TensorType a)
+                    => OpParams -> Tensor v a -> m (Variable a)
 initializedVariable' params initializer = do
-    v <- CoreOps.variable' params []  -- The shape is not known initially.
-    i <- CoreOps.assign' (opAttr "validate_shape" .~ False) v
-                            initializer
+    v@(Variable h) <- variable' params []  -- The shape is not known initially.
+    i <- CoreOps.assignVariableOp h initializer
     addInitializer =<< group i
     return v
 
 -- | Creates a zero-initialized variable with the given shape.
 zeroInitializedVariable
   :: (MonadBuild m, TensorType a, Num a) =>
-     TensorFlow.Types.Shape -> m (Tensor TensorFlow.Tensor.Ref a)
+     TensorFlow.Types.Shape -> m (Variable a)
 zeroInitializedVariable = zeroInitializedVariable' id
 
 zeroInitializedVariable'
   :: (MonadBuild m, TensorType a, Num a) =>
-     OpParams -> TensorFlow.Types.Shape -> m (Tensor TensorFlow.Tensor.Ref a)
+     OpParams -> TensorFlow.Types.Shape -> m (Variable a)
 zeroInitializedVariable' params = initializedVariable' params . zeros
+
+readVar :: TensorType a => Variable a -> Tensor Value a
+readVar = readVar' id
+
+readVar' :: forall a . TensorType a => OpParams -> Variable a -> Tensor Value a
+readVar' params (Variable h)
+    = buildOp (opDef "ReadVariableOp"
+                & opAttr "dtype" .~ tensorType (undefined :: a))
+        h
+
+assign :: (MonadBuild m, TensorType a) => Variable a -> Tensor v a -> m ControlNode
+assign = assign' id
+
+assign' :: (MonadBuild m, TensorType a) => OpParams -> Variable a -> Tensor v a
+        -> m ControlNode
+assign' params (Variable h) v = CoreOps.assignVariableOp' params h v
+
+assignAdd :: (MonadBuild m, TensorType a) => Variable a -> Tensor v a -> m ControlNode
+assignAdd = assignAdd' id
+
+assignAdd' :: (MonadBuild m, TensorType a) => OpParams -> Variable a -> Tensor v a
+        -> m ControlNode
+assignAdd' params (Variable h) v = CoreOps.assignAddVariableOp' params h v
 
 -- TODO: Support heterogeneous list of tensors.
 save :: forall a m v . (MonadBuild m, TensorType a)
@@ -259,21 +304,21 @@ save path xs = do
 restoreFromName :: forall a m . (MonadBuild m, TensorType a)
                 => ByteString    -- ^ File path.
                 -> ByteString    -- ^ Tensor name override.
-                -> Tensor Ref a  -- ^ Tensor to restore.
+                -> Variable a  -- ^ Tensor to restore.
                 -> m ControlNode
-restoreFromName path name x = do
+restoreFromName path name (Variable x) = do
     let restoreOp = buildOp $ opDef "Restore"
                             & opAttr "dt" .~ tensorType (undefined :: a)
-    group =<< CoreOps.assign x
+    group =<< CoreOps.assignVariableOp x
                 (restoreOp (scalar path) (scalar name) :: Tensor Value a)
 
 -- | Restore a tensor's value from a checkpoint file.
 restore :: forall a m . (MonadBuild m, TensorType a)
         => ByteString    -- ^ File path.
-        -> Tensor Ref a  -- ^ Tensor to restore.
+        -> Variable a  -- ^ Tensor to restore.
         -> m ControlNode
-restore path x = do
-    name <- encodeUtf8 . unNodeName <$> build (renderNodeName x)
+restore path x@(Variable h) = do
+    name <- build $ encodeUtf8 . unNodeName <$> renderNodeName h
     restoreFromName path name x
 
 -- | Create a constant tensor.

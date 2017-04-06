@@ -108,13 +108,13 @@ testEmbeddingLookupGradients = testCase "testEmbeddingLookupGradients" $ do
 
             x <- TF.placeholder (TF.Shape [2])
             embedding <- TF.initializedVariable
-                            =<< TF.render (TF.constant embShape embeddingInit)
+                            (TF.constant embShape embeddingInit)
 
-            op <- embeddingLookup [embedding] ids
+            op <- embeddingLookup [TF.readVar embedding] ids
             let twoNorm = CoreOps.square $ TF.abs (op - x)
                 loss    = TF.mean twoNorm (TF.scalar (0 :: Int32))
 
-            grad <- fmap head (TF.gradients loss [embedding])
+            grad <- fmap head (TF.gradients loss [TF.readVar embedding])
             TF.runWithFeeds
                 [TF.feed x $ TF.encodeTensorData shape xVals]
                 grad

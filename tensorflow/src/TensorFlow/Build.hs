@@ -46,6 +46,7 @@ module TensorFlow.Build
     , addGraphDef
     , flushInitializers
     , flushNodeBuffer
+    , uniqueName
     -- * Creating and looking up Ops
     , getOrAddOp
     , addNewOp
@@ -311,10 +312,13 @@ renderPendingNode (PendingNode scope pendingName nodeDef)
     scopePrefix = Text.concat $ fmap ((<> "/") . unScope) scope
     getName = case pendingName of
         ExplicitName n -> return n
-        ImplicitName -> do
-            u@(Unique k) <- use nextUnique
-            nextUnique .= succ u
-            return $ nodeDef ^. op <> "_" <> Text.pack (show k)
+        ImplicitName -> uniqueName $ nodeDef ^. op
+
+uniqueName :: Text -> Build Text
+uniqueName n = do
+    u@(Unique k) <- use nextUnique
+    nextUnique .= succ u
+    return $ n <> "_" <> Text.pack (show k)
 
 
 -- | Render an 'Output' and return a string representation for the TensorFlow

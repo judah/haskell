@@ -28,20 +28,18 @@ import TensorFlow.Build (ControlNode, MonadBuild, build, addInitializer, opAttr,
 import TensorFlow.BuildOp (buildOp)
 import TensorFlow.ControlFlow (group)
 import qualified TensorFlow.GenOps.Core as CoreOps
-import TensorFlow.Tensor (Ref, Value, Tensor, TensorList)
-import TensorFlow.Types (TensorTypes, fromTensorTypes)
+import TensorFlow.Tensor (Value, Tensor, TensorList)
+import TensorFlow.Types (ResourceHandle, TensorTypes, fromTensorTypes)
 
 -- | A queue carrying tuples.
-data Queue (as :: [*]) = Queue { handle :: Handle }
-
-type Handle = Tensor Ref ByteString
+data Queue (as :: [*]) = Queue { handle :: Tensor Value ResourceHandle }
 
 -- | Adds the given values to the queue.
 enqueue :: forall as v m . (MonadBuild m, TensorTypes as)
            => Queue as
            -> TensorList v as
            -> m ControlNode
-enqueue = CoreOps.queueEnqueue . handle
+enqueue = CoreOps.queueEnqueueV2 . handle
 
 -- | Retrieves the values from the queue.
 dequeue :: forall as m . (MonadBuild m, TensorTypes as)
@@ -50,7 +48,7 @@ dequeue :: forall as m . (MonadBuild m, TensorTypes as)
            -- ^ Dequeued tensors. They are coupled in a sense
            -- that values appear together, even if they are
            -- not consumed together.
-dequeue = CoreOps.queueDequeue . handle
+dequeue = CoreOps.queueDequeueV2 . handle
 
 -- | Creates a new queue with the given capacity and shared name.
 makeQueue :: forall as m . (MonadBuild m, TensorTypes as)
@@ -60,7 +58,7 @@ makeQueue :: forall as m . (MonadBuild m, TensorTypes as)
                             -- under the given name across multiple sessions.
               -> m (Queue as)
 makeQueue capacity sharedName = do
-    q <- build $ buildOp (opDef "FIFOQueue"
+    q <- build $ buildOp (opDef "FIFOQueueV2"
                      & opAttr "component_types" .~ fromTensorTypes (Proxy :: Proxy as)
                      & opAttr "shared_name" .~ sharedName
                      & opAttr "capacity" .~ capacity

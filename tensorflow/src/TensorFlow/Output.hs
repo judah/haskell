@@ -37,7 +37,6 @@ module TensorFlow.Output
     , outputIndex
     , outputOp
     , PendingNodeName(..)
-    , ResourceHandle(..)
     )  where
 
 import qualified Data.Map.Strict as Map
@@ -158,8 +157,3 @@ instance IsString Output where
                          -> Output (fromInteger ix) $ assigned n
         _ -> Output 0 $ assigned s
         where assigned n = Rendered $ def & name .~ Text.pack n
-
-
--- | Opaque handle to a mutable resource in the graph.  Typical such
--- resources are variables.
-newtype ResourceHandle = ResourceHandle Output
