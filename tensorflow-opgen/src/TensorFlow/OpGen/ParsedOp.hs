@@ -141,8 +141,8 @@ data ArgType
 data ArgKind
     = ArgTensorRef -- Tensor Ref a
     | ArgTensorValue -- Tensor Value a
-    | ArgTensorBuild -- Tensor Build a
-    | ArgSomeTensor Text -- Tensor v a; the Text is the variable 'v'.
+    | ArgTensorExpr -- Expr (Tensor Value a)
+    | ArgSomeTensor Text -- Expr (Tensor v a); the Text is the variable 'v'.
     deriving (Eq)
 
 isRefCase :: ParsedArgCase -> Bool
@@ -258,7 +258,7 @@ outputTensorKind :: Bool -> OpDef'ArgDef -> ArgKind
 outputTensorKind isMonadic a
     | a ^. isRef = ArgTensorRef
     | isMonadic = ArgTensorValue
-    | otherwise = ArgTensorBuild
+    | otherwise = ArgTensorExpr
 
 getExplicitInputAttr :: OpDef -> Set.Set TFName -> OpDef'AttrDef -> Maybe AttrType
 getExplicitInputAttr o implicitAttrs a

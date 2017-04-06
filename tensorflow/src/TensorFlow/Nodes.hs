@@ -24,6 +24,7 @@
 module TensorFlow.Nodes where
 
 import Control.Applicative (liftA2, liftA3)
+import Control.Monad ((>=>))
 import Data.Functor.Identity (Identity)
 import Data.Map.Strict (Map)
 import Data.Monoid ((<>))
@@ -41,6 +42,9 @@ import qualified TensorFlow.Internal.FFI as FFI
 -- | Types that contain ops which can be run.
 class Nodes t where
     getNodes :: t -> Build (Set NodeName)
+
+instance Nodes t => Nodes (Expr t) where
+    getNodes = render >=> getNodes
 
 -- | Types that tensor representations (e.g. 'Tensor', 'ControlNode') can be
 -- fetched into.
@@ -65,6 +69,9 @@ instance Applicative Fetch where
     pure x = Fetch Set.empty (const x)
     Fetch fetch restore <*> Fetch fetch' restore' =
         Fetch (fetch <> fetch') (restore <*> restore')
+
+instance Fetchable t a => Fetchable (Expr t) a where
+    getFetch = render >=> getFetch
 
 nodesUnion :: (Monoid b, Traversable t, Applicative f) => t (f b) -> f b
 nodesUnion = fmap (foldMap id) . sequenceA
@@ -113,12 +120,12 @@ instance (Fetchable (f t) a, Fetchable (ListOf f ts) (List as), i ~ Identity)
     getFetch (x :/ xs) = liftA2 (\y ys -> y /:/ ys) <$> getFetch x <*> getFetch xs
 
 instance Nodes (Tensor v a) where
-    getNodes (Tensor o) = Set.singleton . outputNodeName <$> toBuild o
+    getNodes = pure . Set.singleton . tensorNodeName
 
 fetchTensorVector :: forall a v . (TensorType a)
                   => Tensor v a -> Build (Fetch (TensorData a))
 fetchTensorVector (Tensor o) = do
-    outputName <- encodeOutput <$> toBuild o
+    let outputName = encodeOutput o
     pure $ Fetch (Set.singleton outputName) $ \tensors ->
         let tensorData = tensors Map.! outputName
             expectedType = tensorType (undefined :: a)

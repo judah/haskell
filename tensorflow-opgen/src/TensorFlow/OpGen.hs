@@ -153,7 +153,7 @@ imports = stack [
     , "import Lens.Family2 ((.~), (&))"
     , "import TensorFlow.Build"
     , "import TensorFlow.BuildOp"
-    , "import TensorFlow.Output (ResourceHandle)"
+    , "import TensorFlow.Output (Output, ResourceHandle)"
     , "import TensorFlow.Tensor"
     , "import TensorFlow.Types"
     ]
@@ -234,11 +234,14 @@ functionBody :: ParsedOp -> Doc
 functionBody pOp
     | parsedOpIsMonadic pOp
         = "build $ do"
-            </> indent indentation (bindOpInputsVar
+            </> indent indentation
+                (opInputsVar <+> " :: [Output] <- render $" <+> getOpInputs
                         </> "buildOp" <+> outputListsSizes <+> opDef)
     | otherwise
         = "pureOp" <+> outputListsSizes <+> "$ do"
-            </> indent indentation (bindOpInputsVar </> "return" <+> opDef)
+            </> indent indentation
+                    (opInputsVar <+> " :: [Output] <-" <+> getOpInputs
+                        </> "return" <+> opDef)
   where
     outputListsSizes = brackets $ commasep
         [ renderHaskellName a
@@ -246,7 +249,8 @@ functionBody pOp
             <- parsedOutputs pOp
         ]
     opInputsVar = "op'inputs"
-    bindOpInputsVar = opInputsVar <+> "<- fmap Prelude.concat $ Prelude.sequence"
+    getOpInputs = 
+                            "fmap Prelude.concat $ Prelude.sequence"
                             <+> brackets (commasep $ map (\a -> "buildInputs" <+> a) tensorArgs)
     opDef = parens $ hang 0 $ stack $
         "opDef" <+> renderQuotedTFName (parsedOpName pOp) :
@@ -343,13 +347,17 @@ tensorArg p = case parsedArgCase p of
     kind k = case k of
                 ArgTensorRef -> "Ref"
                 ArgTensorValue -> "Value"
-                ArgTensorBuild -> "Build"
+                ArgTensorExpr -> "Value"
                 ArgSomeTensor v -> strictText v
+    wrap k t = case k of
+            ArgTensorExpr -> "Expr" <+> parens t
+            ArgSomeTensor _ -> "Expr" <+> parens t
+            _ -> t
     tensorType t k = let
         a = case t of
                 ArgTypeFixed dt -> strictText $ dtTypeToHaskell dt
                 ArgTypeAttr n -> renderHaskellName n
-        in "Tensor" <+> kind k <+> a
+        in wrap k ("Tensor" <+> kind k <+> a)
 
 attrComment :: Attr a -> Doc
 attrComment a = argComment' (attrName a) (attrDescription a)

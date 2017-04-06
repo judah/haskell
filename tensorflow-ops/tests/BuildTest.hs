@@ -36,6 +36,8 @@ import TensorFlow.Build
     , flushNodeBuffer
     , withDevice
     , withNameScope
+    , render
+    , Expr
     , opName
     )
 import TensorFlow.Types (unScalar)
@@ -50,7 +52,6 @@ import TensorFlow.Ops
 import TensorFlow.Output (Device(..))
 import TensorFlow.Tensor
     ( colocateWith
-    , render
     , Tensor
     , Value
     , Ref
@@ -89,7 +90,7 @@ testInitializedVariable =
         (formula, reset) <- do
             v <- initializedVariable 42
             r <- assign v 24
-            return (1 `add` v, r)
+            return (1 `add` pure v, r)
         result <- run formula
         liftIO $ 43 @=? (unScalar result :: Float)
         run_ reset  -- Updates v to a different value
@@ -161,7 +162,7 @@ testDeviceColocation = testCase "testDeviceColocation" $ evalBuildT $ do
         -- A stateful op and a pure op.
         var :: Tensor Ref Float <- withDevice (Just $ Device "dev0") $ variable []
         -- Uses render to cause the expression be added to the graph.
-        _ <- colocateWith var $ render $ 3 `add` var
+        _ <- colocateWith var $ render $ 3 `add` pure var
         return ()
 
 main :: IO ()

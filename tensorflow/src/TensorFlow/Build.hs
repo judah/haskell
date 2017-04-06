@@ -59,6 +59,9 @@ module TensorFlow.Build
     , withDevice
     , withNameScope
     , withNodeDependencies
+    -- * Expr
+    , Expr(..)
+    , render
     ) where
 
 import Control.Monad.Catch (MonadThrow, MonadCatch, MonadMask)
@@ -247,8 +250,8 @@ addGraphDef g = build $ nodeBuffer <>= g ^. node
 
 -- | Render the given op if it hasn't been rendered already, and return its
 -- name.
-getOrAddOp :: OpDef -> Build NodeName
-getOrAddOp o = do
+getOrAddOp :: OpDef -> Expr NodeName
+getOrAddOp o = Expr $ do
     pending <- getPendingNode o
     uses renderedNodes (Map.lookup pending) >>= \case
         Just n -> return $ NodeName $ n ^. name
@@ -336,3 +339,11 @@ withNameScope s = withStateLens currentScope (Scope s :)
 -- | Add control inputs to all nodes rendered in the given 'Build' action.
 withNodeDependencies :: MonadBuild m => Set NodeName -> m a -> m a
 withNodeDependencies nodes = withStateLens defaultControlInputs (<> nodes)
+
+-- | An idempotent build action.
+newtype Expr a = Expr (Build a)
+    deriving (Functor, Applicative, Monad)
+
+render :: MonadBuild m => Expr a -> m a
+render (Expr x) = build x
+

@@ -53,56 +53,21 @@ import qualified TensorFlow.Internal.FFI as FFI
 --
 -- Note that 'expr', 'value', 'render' and 'renderValue' can help convert between
 -- the different types of 'Tensor'.
-data Tensor v a where
-    Tensor :: TensorKind v => {tensorOutput :: v Output} -> Tensor v a
+newtype Tensor v a = Tensor {tensorOutput :: Output}
 
-newtype Value a = Value {runValue :: a}
-    deriving Functor
-
-instance Applicative Value where
-    pure = Value
-    Value f <*> Value x = Value $ f x
-
-instance Monad Value where
-    f >>= g = g $ runValue f
-
-newtype Ref a = Ref {runRef :: a}
-    deriving Functor
-
-instance Applicative Ref where
-    pure = Ref
-    Ref f <*> Ref x = Ref $ f x
-
-instance Monad Ref where
-    f >>= g = g $ runRef f
+data Ref
+data Value
 
 -- | Cast a 'Tensor Ref' into a 'Tensor Value'. This behaves like a no-op.
 value :: Tensor Ref a -> Tensor Value a
-value (Tensor o) = Tensor $ Value $ runRef o
-
-renderValue :: MonadBuild m => Tensor v a -> m (Tensor Value a)
-renderValue (Tensor o) = render $ Tensor $ toBuild o
+value (Tensor o) = Tensor o
 
 -- | A pair of a 'Tensor' and some data that should be fed into that 'Tensor'
 -- when running the graph.
 data Feed = Feed Output FFI.TensorData
 
--- | A class ensuring that a given tensor is rendered, i.e., has a fixed
--- name, device, etc.
-class TensorKind v => Rendered v where
-    rendered :: v a -> a
-
-instance Rendered Value where
-    rendered = runValue
-
-instance Rendered Ref where
-    rendered = runRef
-
-renderedOutput :: Rendered v => Tensor v a -> Output
-renderedOutput = rendered . tensorOutput
-
-tensorNodeName :: Rendered v => Tensor v a -> NodeName
-tensorNodeName = outputNodeName . renderedOutput
+tensorNodeName :: Tensor v a -> NodeName
+tensorNodeName = outputNodeName . tensorOutput
 
 
 -- | Create a 'Feed' for feeding the given data into a 'Tensor' when running
@@ -110,14 +75,14 @@ tensorNodeName = outputNodeName . renderedOutput
 --
 -- Note that if a 'Tensor' is rendered, its identity may change; so feeding the
 -- rendered 'Tensor' may be different than feeding the original 'Tensor'.
-feed :: Rendered v => Tensor v a -> TensorData a -> Feed
-feed t (TensorData td) = Feed (renderedOutput t) td
+feed :: Tensor v a -> TensorData a -> Feed
+feed t (TensorData td) = Feed (tensorOutput t) td
 
 -- | Create a 'Tensor' for a given name.  This can be used to reference nodes
 -- in a 'GraphDef' that was loaded via 'addGraphDef'.
 -- TODO(judahjacobson): add more safety checks here.
-tensorFromName :: TensorKind v => Text.Text -> Tensor v a
-tensorFromName = Tensor . pure . fromString . Text.unpack
+tensorFromName :: Text.Text -> Tensor v a
+tensorFromName = Tensor . fromString . Text.unpack
 
 -- | Like 'tensorFromName', but type-restricted to 'Value'.
 tensorValueFromName :: Text.Text -> Tensor Value a
@@ -129,65 +94,37 @@ tensorRefFromName = tensorFromName
 
 type TensorList v = ListOf (Tensor v)
 
-tensorListOutputs :: Rendered v => TensorList v as -> [Output]
+tensorListOutputs :: TensorList v as -> [Output]
 tensorListOutputs Nil = []
-tensorListOutputs (t :/ ts) = renderedOutput t : tensorListOutputs ts
+tensorListOutputs (t :/ ts) = tensorOutput t : tensorListOutputs ts
 
 -- | Places all nodes rendered in the given 'Build' action on the same
 -- device as the given Tensor (see also 'withDevice'). Make sure that
 -- the action has side effects of rendering the desired tensors. A pure
 -- return would not have the desired effect.
-colocateWith :: (MonadBuild m, Rendered v) => Tensor v b -> m a -> m a
+colocateWith :: MonadBuild m => Tensor v b -> m a -> m a
 colocateWith t x = do
     d <- build $ Device . (^. device)
-               <$> lookupNode (outputNodeName $ renderedOutput t)
+               <$> lookupNode (outputNodeName $ tensorOutput t)
     withDevice (Just d) x
 
-
--- | Render a 'Tensor', fixing its name, scope, device and control inputs from
--- the 'MonadBuild' context.  Also renders any dependencies of the 'Tensor' that
--- weren't already rendered.
---
--- This operation is idempotent; calling 'render' on the same input in the same
--- context will produce the same result.  However, rendering the same
--- @Tensor Build@ in two different contexts may result in two different
--- @Tensor Value@s.
-render :: MonadBuild m => Tensor Build a -> m (Tensor Value a)
-render (Tensor t) = Tensor . Value <$> build t
-
--- TODO: better name.
-expr :: TensorKind v => Tensor v a -> Tensor Build a
-expr (Tensor o) = Tensor $ toBuild o
 
 -- | Records the given summary action in Build for retrieval with
 -- Summary protocol buffer in string form. For safety, use the
 -- pre-composed functions: Logging.scalarSummary and
 -- Logging.histogramSummary.
-addSummary :: (MonadBuild m, TensorKind v) => Tensor v ByteString -- ^ A 'SummaryTensor'
+addSummary :: MonadBuild m => Tensor v ByteString -- ^ A 'SummaryTensor'
                         -> m ()
 addSummary t = build $ do
     -- TODO: more generic way
-    o <- toBuild $ tensorOutput t
+    let o = tensorOutput t
     summaries %= (o :)
 
 -- | Retrieves the summary ops collected thus far. Typically this only
 -- happens once, but if 'TensorFlow.Session.buildWithSummary' is used
 -- repeatedly, the values accumulate.
 collectAllSummaries :: MonadBuild m => m [SummaryTensor]
-collectAllSummaries = build $ map (Tensor . Value) <$> use summaries
+collectAllSummaries = build $ map Tensor <$> use summaries
 
 -- | Synonym for the tensors that return serialized Summary proto.
 type SummaryTensor = Tensor Value ByteString
-
--- | An internal class for kinds of Tensors.
-class Monad v => TensorKind v where
-    toBuild :: v a -> Build a
-
-instance TensorKind Value where
-    toBuild = return . rendered
-
-instance TensorKind Ref where
-    toBuild = return . rendered
-
-instance TensorKind Build where
-    toBuild = id

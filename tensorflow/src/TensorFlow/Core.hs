@@ -59,7 +59,8 @@ module TensorFlow.Core
     , Ref
     , value
     , tensorFromName
-    , expr
+      -- * Expr
+    , Expr
       -- ** Element types
     , TensorType
     , TensorData

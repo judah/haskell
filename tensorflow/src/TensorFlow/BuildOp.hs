@@ -91,13 +91,13 @@ recordResult = do
 instance BuildResult ResourceHandle where
     buildResult = ResourceHandle <$> recordResult
 
-instance Rendered v => BuildResult (Tensor v a) where
-    buildResult = Tensor . pure <$> recordResult
+instance BuildResult (Tensor v a) where
+    buildResult = Tensor <$> recordResult
 
 instance BuildResult ControlNode where
     buildResult = ControlNode <$> ask
 
-instance (Rendered v, TensorTypes as) => BuildResult (TensorList v as) where
+instance TensorTypes as => BuildResult (TensorList v as) where
   buildResult = loop (tensorTypes :: TensorTypeList as)
     where
         loop :: TensorTypeList bs -> Result (TensorList v bs)
@@ -138,17 +138,17 @@ eqLengthGuard = all eachOk
 
 -- | Class of types that can be used as op outputs.
 class PureResult a where
-    pureResult :: ReaderT (Build OpDef) (State ResultState) a
+    pureResult :: ReaderT (Expr OpDef) (State ResultState) a
 
-instance PureResult (Tensor Build a) where
+instance PureResult (Expr (Tensor Value a)) where
     pureResult = do
         ResultState i ns <- get
         put $! ResultState (i+1) ns
         makeOp <- ask
-        return $ Tensor $ do
+        return $ do
             o <- makeOp
             -- TODO: unify with BuildResult (Tensor v)
-            output i <$> getOrAddOp o
+            Tensor . output i <$> getOrAddOp o
 
 instance (PureResult a1, PureResult a2) => PureResult (a1, a2) where
     pureResult = (,) <$> pureResult <*> pureResult
@@ -194,33 +194,38 @@ instance PureResult a => PureResult [a] where
                 put $! ResultState i rest
                 replicateM (fromIntegral n) pureResult
 
-instance TensorTypes as => PureResult (TensorList Build as) where
+-- TODO: want TensorList (\a -> Expr (Tensor v a))
+instance TensorTypes as => PureResult (TensorList v as) where
+    pureResult = undefined
+    {-
     pureResult = loop (tensorTypes :: TensorTypeList as)
       where
         loop :: TensorTypeList bs -> ReaderT (Build OpDef) (State ResultState)
-                                        (TensorList Build bs)
+                                        (TensorList v bs)
         loop Nil = return Nil
         loop (TensorTypeProxy :/ ls) = do
             t <- pureResult
             ts <- loop ls
             return (t :/ ts)
+    -}
 
-pureOp :: PureResult a => [Int64] -> Build OpDef -> a
+pureOp :: PureResult a => [Int64] -> Expr OpDef -> a
 pureOp sizes o = flip evalState (ResultState 0 sizes) (runReaderT pureResult o)
 
 -----
 -- Class of types that can be used as arguments
 
 class BuildInputs a where
-    buildInputs :: a -> Build [Output]
+    buildInputs :: a -> Expr [Output]
 
 instance BuildInputs a => BuildInputs [a] where
     buildInputs = fmap concat . mapM buildInputs
 
+instance BuildInputs a => BuildInputs (Expr a) where
+    buildInputs m = m >>= buildInputs
+
 instance BuildInputs (Tensor v a) where
-    buildInputs (Tensor t) = do
-        o <- toBuild t
-        return [o]
+    buildInputs (Tensor o) = return [o]
 
 instance BuildInputs (ListOf (Tensor v) as) where
     buildInputs Nil = return []
