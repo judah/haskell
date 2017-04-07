@@ -174,7 +174,6 @@ import qualified Proto.Tensorflow.Core.Framework.TensorShape
 import TensorFlow.Build
 import TensorFlow.BuildOp
 import TensorFlow.ControlFlow (group)
-import TensorFlow.Output (unNodeName)
 import TensorFlow.Tensor
 import TensorFlow.Types
 
@@ -191,7 +190,7 @@ import qualified Prelude (abs)
 -- "1".
 instance ( TensorType a
          , Num a
-         , v ~ Value
+         , v ~ Build
          , OneOf '[ Double, Float, Int32, Int64
                   , Complex Float, Complex Double] a) => Num (Tensor v a) where
     (+) = CoreOps.add
@@ -202,10 +201,10 @@ instance ( TensorType a
     signum = CoreOps.sign
     negate = CoreOps.neg
 
-matTranspose :: TensorType a => Tensor v a -> Tensor Value a
+matTranspose :: TensorType a => Tensor e a -> Tensor Build a
 matTranspose = matTranspose' id
 
-matTranspose' :: TensorType a => OpParams -> Tensor v a -> Tensor Value a
+matTranspose' :: TensorType a => OpParams -> Tensor v a -> Tensor Build a
 matTranspose' params = flip (CoreOps.transpose' params) (vector [1, 0 :: Int32])
 
 placeholder :: (MonadBuild m, TensorType a) => Shape -> m (Tensor Value a)
@@ -216,7 +215,7 @@ placeholder' :: forall m a . (MonadBuild m, TensorType a)
 placeholder' params pShape
     -- Note: we don't use CoreOps.placeholder' since that op isn't stateful,
     -- and thus would be CSE'd.
-    = build $ buildOp $ opDef "Placeholder"
+    = build $ buildOp [] $ opDef "Placeholder"
                 & opAttr "dtype" .~ tensorType (undefined :: a)
                 & opAttr "shape" .~ pShape
                 & params
@@ -239,7 +238,7 @@ variable' params s = do
 -- | Creates a variable initialized to the given value.
 -- Initialization happens next time session runs.
 initializedVariable :: (MonadBuild m, TensorType a)
-                    => Tensor Value a -> m (Variable a)
+                    => Tensor v a -> m (Variable a)
 initializedVariable = initializedVariable' id
 
 initializedVariable' :: forall a m v . (MonadBuild m, TensorType a)
@@ -261,14 +260,17 @@ zeroInitializedVariable'
      OpParams -> TensorFlow.Types.Shape -> m (Variable a)
 zeroInitializedVariable' params = initializedVariable' params . zeros
 
-readVar :: TensorType a => Variable a -> Tensor Value a
+readVar :: TensorType a => Variable a -> Tensor Build a
 readVar = readVar' id
 
-readVar' :: forall a . TensorType a => OpParams -> Variable a -> Tensor Value a
+readVar' :: forall a . TensorType a => OpParams -> Variable a -> Tensor Build a
 readVar' params (Variable h)
-    = buildOp (opDef "ReadVariableOp"
-                & opAttr "dtype" .~ tensorType (undefined :: a))
-        h
+    = pureOp [] $ do
+        os <- buildInputs h
+        pure $ opDef "ReadVariableOp"
+                & (params
+                    . (opAttr "dtype" .~ tensorType (undefined :: a))
+                    . (opInputs .~ os))
 
 assign :: (MonadBuild m, TensorType a) => Variable a -> Tensor v a -> m ControlNode
 assign = assign' id
@@ -285,17 +287,20 @@ assignAdd' :: (MonadBuild m, TensorType a) => OpParams -> Variable a -> Tensor v
 assignAdd' params (Variable h) v = CoreOps.assignAddVariableOp' params h v
 
 -- TODO: Support heterogeneous list of tensors.
-save :: forall a m v . (MonadBuild m, TensorType a)
+save :: forall a m v . (Rendered v, MonadBuild m, TensorType a)
         => ByteString     -- ^ File path.
         -> [Tensor v a]  -- ^ Tensors to save.
         -> m ControlNode
-save path xs = do
-    let toByteStringTensor = scalar . encodeUtf8 . unNodeName
-    names <- mapM (fmap toByteStringTensor . build . renderNodeName) xs
+save path xs = build $ do
+    let toByteStringTensor = scalar . encodeUtf8 . encodeOutput . renderedOutput
+    let names = fmap toByteStringTensor xs
     let types = replicate (length xs) (tensorType (undefined :: a))
-    let saveOp = buildOp $ opDef "Save"
-                         & opAttr "T" .~ types
-    build $ saveOp (scalar path) (CoreOps.pack names) xs
+    names' <- buildInputs $ CoreOps.pack names
+    xs' <- buildInputs xs
+    path' <- buildInputs $ scalar path
+    buildOp [] $ opDef "Save"
+                    & opAttr "T" .~ types
+                    & opInputs .~ (path' ++ names' ++ xs')
 
 -- | Restore a tensor's value from a checkpoint file.
 --
@@ -306,20 +311,22 @@ restoreFromName :: forall a m . (MonadBuild m, TensorType a)
                 -> ByteString    -- ^ Tensor name override.
                 -> Variable a  -- ^ Tensor to restore.
                 -> m ControlNode
-restoreFromName path name (Variable x) = do
-    let restoreOp = buildOp $ opDef "Restore"
-                            & opAttr "dt" .~ tensorType (undefined :: a)
-    group =<< CoreOps.assignVariableOp x
-                (restoreOp (scalar path) (scalar name) :: Tensor Value a)
+restoreFromName path name x@(Variable h) = build $ do
+    path' <- buildInputs $ scalar path
+    name' <- buildInputs $ scalar name
+    restoreOp <- buildOp [] $ opDef "Restore"
+                               & opAttr "dt" .~ tensorType (undefined :: a)
+                               & opInputs .~ (path' ++ name')
+    group =<< assign x (expr (restoreOp :: Tensor Value a))
 
 -- | Restore a tensor's value from a checkpoint file.
 restore :: forall a m . (MonadBuild m, TensorType a)
         => ByteString    -- ^ File path.
         -> Variable a  -- ^ Tensor to restore.
         -> m ControlNode
-restore path x@(Variable h) = do
-    name <- build $ encodeUtf8 . unNodeName <$> renderNodeName h
-    restoreFromName path name x
+restore path x@(Variable h) = restoreFromName path name x
+  where
+    name = encodeUtf8 $ encodeOutput $ renderedOutput h
 
 -- | Create a constant tensor.
 --
@@ -328,10 +335,10 @@ restore path x@(Variable h) = do
 --   element 0:   index (0, ..., 0)
 --   element 1:   index (0, ..., 1)
 --   ...
-constant :: TensorType a => Shape -> [a] -> Tensor Value a
+constant :: TensorType a => Shape -> [a] -> Tensor Build a
 constant = constant' id
 
-constant' :: forall a . TensorType a => OpParams -> Shape -> [a] -> Tensor Value a
+constant' :: forall a . TensorType a => OpParams -> Shape -> [a] -> Tensor Build a
 constant' params (Shape cShape) values
     | invalidLength = error invalidLengthMsg
     | otherwise = CoreOps.const' (params . (opAttr "value" .~ typedNode))
@@ -350,24 +357,24 @@ constant' params (Shape cShape) values
 -- | Reshape a N-D tensor down to a scalar.
 --
 -- See `TensorFlow.GenOps.Core.reshape`.
-scalarize :: (TensorType a) => Tensor v a -> Tensor Value a
+scalarize :: TensorType a => Tensor v a -> Tensor Build a
 scalarize t = CoreOps.reshape t (vector scalarShape)
     where
         scalarShape = [] :: [Int32]
 
 
 -- | Create a constant vector.
-vector :: TensorType a => [a] -> Tensor Value a
+vector :: TensorType a => [a] -> Tensor Build a
 vector = vector' id
 
-vector' :: TensorType a => OpParams -> [a] -> Tensor Value a
+vector' :: TensorType a => OpParams -> [a] -> Tensor Build a
 vector' params xs = constant' params [fromIntegral $ length xs] xs
 
 -- | Create a constant scalar.
-scalar :: TensorType a => a -> Tensor Value a
+scalar :: TensorType a => a -> Tensor Build a
 scalar = scalar' id
 
-scalar' :: TensorType a => OpParams -> a -> Tensor Value a
+scalar' :: TensorType a => OpParams -> a -> Tensor Build a
 scalar' params x = constant' params [] [x]
 
 -- | Random tensor from the unit normal distribution with bounded values.
@@ -383,28 +390,28 @@ truncatedNormal' :: (MonadBuild m, OneOf '[Word16, Double, Float] a)
                 -> m (Tensor Value a)
 truncatedNormal' = CoreOps.truncatedNormal'
 
-zeros :: forall a . (Num a, TensorType a) => Shape -> Tensor Value a
+zeros :: forall a . (Num a, TensorType a) => Shape -> Tensor Build a
 zeros (Shape s) = CoreOps.fill (vector $ map fromIntegral s) (scalar 0)
 
-shape :: TensorType t => Tensor v1 t -> Tensor Value Int32
+shape :: TensorType t => Tensor v t -> Tensor Build Int32
 shape = CoreOps.shape
 
-shape' :: TensorType t => OpParams -> Tensor v1 t -> Tensor Value Int32
+shape' :: TensorType t => OpParams -> Tensor v t -> Tensor Build Int32
 shape' = CoreOps.shape'
 
-expandDims :: TensorType t => Tensor v1 t -> Tensor v2 Int32 -> Tensor Value t
+expandDims :: TensorType t => Tensor v1 t -> Tensor v2 Int32 -> Tensor Build t
 expandDims = CoreOps.expandDims
 
-expandDims' :: TensorType t => OpParams -> Tensor v1 t -> Tensor v2 Int32 -> Tensor Value t
+expandDims' :: TensorType t => OpParams -> Tensor v1 t -> Tensor v2 Int32 -> Tensor Build t
 expandDims' = CoreOps.expandDims'
 
 -- | Helper function for reduction ops (translation of math_ops.reduced_shape).
 reducedShape :: (OneOf '[ Int32, Int64 ] t1, OneOf '[ Int32, Int64 ] t2) =>
-                Tensor v1 t1 -> Tensor v2 t2 -> Tensor Value Int32
+                Tensor v1 t1 -> Tensor v2 t2 -> Tensor Build Int32
 reducedShape inputShape axes =
     let inputShape32 = toInt32 inputShape         -- [2, 3, 5, 7]
         axes32 = toInt32 axes                     -- [1, 2]
-        toInt32 x = CoreOps.cast x :: Tensor Value Int32
+        toInt32 x = CoreOps.cast x :: Tensor Build Int32
         inputRank = CoreOps.size inputShape32     -- 4
         axesMod = (axes32 + inputRank) `CoreOps.mod` inputRank
         axesShape = shape axesMod                 -- [2]

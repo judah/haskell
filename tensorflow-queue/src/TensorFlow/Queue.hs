@@ -58,7 +58,7 @@ makeQueue :: forall as m . (MonadBuild m, TensorTypes as)
                             -- under the given name across multiple sessions.
               -> m (Queue as)
 makeQueue capacity sharedName = do
-    q <- build $ buildOp (opDef "FIFOQueueV2"
+    q <- build $ buildOp [] (opDef "FIFOQueueV2"
                      & opAttr "component_types" .~ fromTensorTypes (Proxy :: Proxy as)
                      & opAttr "shared_name" .~ sharedName
                      & opAttr "capacity" .~ capacity

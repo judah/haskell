@@ -41,11 +41,13 @@ fit xData yData = TF.runSession $ do
     return (w', b')
 
 gradientDescent :: Float
-                -> TF.Tensor TF.Value Float
+                -> TF.Tensor TF.Build Float
                 -> [TF.Variable Float]
                 -> TF.Session TF.ControlNode
 gradientDescent alpha loss params = do
     let applyGrad param grad =
-            TF.assign param (TF.readVar param - TF.scalar alpha * grad)
+            TF.assign param (TF.readVar param - TF.scalar alpha `TF.mul` grad)
+    -- TODO: this is suspect...
+    reads <- mapM (TF.render . TF.readVar) params
     TF.group =<< zipWithM applyGrad params
-        =<< TF.gradients loss (map TF.readVar params)
+        =<< TF.gradients loss reads

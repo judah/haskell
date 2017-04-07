@@ -175,7 +175,7 @@ renderOp pOp = stack $
     -- to stack calling "-dump-hi" which (unnecessarily) includes the
     -- inlining information, and is large for ops with many arguments.
 #if __GLASGOW_HASKELL__ < 800
-    , "{-# NOINLINE " <> n <> "#-}"
+    , "{-# NOINLINE" <+> n <+> "#-}"
 #endif
     , n <+> "::" <+> hang 0 (typeSig empty pOp)
     , n <+> "=" <+> n <> "' id"
@@ -229,21 +229,24 @@ renderHaskellAttrName :: Attr a -> Doc
 renderHaskellAttrName = renderHaskellName . attrName
 
 functionBody :: ParsedOp -> Doc
-functionBody pOp = maybeLift <+> buildFunction <+> parens (hang 0 (stack buildOpParts))
-                        </> indent indentation (sep tensorArgs)
+functionBody pOp
+    | parsedOpIsMonadic pOp
+        = "build $ do"
+            </> indent indentation (bindOpInputsVar
+                        </> "buildOp" <+> outputListsSizes <+> opDef)
+    | otherwise
+        = "pureOp" <+> outputListsSizes <+> "$ do"
+            </> indent indentation (bindOpInputsVar </> "return" <+> opDef)
   where
-    maybeLift
-        | parsedOpIsMonadic pOp = "build $"
-        | otherwise = ""
-    buildFunction
-        | null outputListsSizes = "buildOp"
-        | otherwise = "buildListOp" <+>
-                        brackets (commasep $
-                                    map renderHaskellName outputListsSizes)
-    outputListsSizes = [ a
-                       | ParsedArg { parsedArgCase = ListArg { argLength = a } }
-                            <- parsedOutputs pOp]
-    buildOpParts =
+    outputListsSizes = brackets $ commasep
+        [ renderHaskellName a
+        | ParsedArg { parsedArgCase = ListArg { argLength = a } }
+            <- parsedOutputs pOp
+        ]
+    opInputsVar = "op'inputs"
+    bindOpInputsVar = opInputsVar <+> "<- fmap Prelude.concat $ Prelude.sequence"
+                            <+> brackets (commasep $ map (\a -> "buildInputs" <+> a) tensorArgs)
+    opDef = parens $ hang 0 $ stack $
         "opDef" <+> renderQuotedTFName (parsedOpName pOp) :
         -- Renders type parameter arguments.
         [ "& opAttr" <+> renderQuotedTFName n <+> ".~" <+> inferredTypeExpr a
@@ -257,10 +260,9 @@ functionBody pOp = maybeLift <+> buildFunction <+> parens (hang 0 (stack buildOp
         [ "& opAttr" <+> renderQuotedTFName n <+> ".~" <+> renderHaskellName n
         | a <- inferredListSizeAttrs pOp, let n = attrName a
         ] ++
-        ["& op'options"]
-
-
-    tensorArgs = renderHaskellName . parsedArgName <$> parsedInputs pOp
+        ["& op'options & opInputs .~" <+> opInputsVar]
+    tensorArgs = renderTensorArg <$> parsedInputs pOp
+    renderTensorArg = renderHaskellName . parsedArgName
     inferredTypeExpr a
         | typeParamIsList $ attrInfo a
             = "fromTensorTypes (Proxy :: Proxy" <+> renderHaskellAttrName a
@@ -294,7 +296,7 @@ typeSig pre pOp = constraints
         | null classConstraints = empty
         | otherwise = "forall" <+> sep typeParams <+> "." <+> tuple classConstraints <+> "=>"
     typeParams = [strictText v | k <- parsedInputs pOp ++ parsedOutputs pOp,
-                  ArgTensorEither v <- [argKind $ parsedArgCase k]]
+                  ArgSomeTensor v <- [argKind $ parsedArgCase k]]
                 ++ [renderHaskellAttrName n | n <- inferredTypeAttrs pOp]
                 ++ if parsedOpIsMonadic pOp then ["m'"] else []
     -- Use m' as the type parameter to avoid clashing with an attribute name.
@@ -325,7 +327,7 @@ typeSig pre pOp = constraints
     wrapOutput o
         | parsedOpIsMonadic pOp = "m'" <+> parens o
         | otherwise = o
-        
+
 -- | Render an op input or output.
 -- For example: "Tensor Ref Int64", "Tensor v t"
 tensorArg :: ParsedArg -> Doc
@@ -333,12 +335,13 @@ tensorArg p = case parsedArgCase p of
     SimpleArg { argType = t, argKind = k } -> tensorType t k
     ListArg { argType = t, argKind = k } -> brackets $ tensorType t k
     MixedListArg {argTypeAttr = t, argKind = k}
-        -> "TensorList" <+> kind k <+> renderHaskellName t
+        -> "TensorList" <+> parens (kind k) <+> renderHaskellName t
   where
     kind k = case k of
                 ArgTensorRef -> "Ref"
                 ArgTensorValue -> "Value"
-                ArgTensorEither v' -> strictText v'
+                ArgTensorBuild -> "Build"
+                ArgSomeTensor v -> strictText v
     tensorType t k = let
         a = case t of
                 ArgTypeFixed dt -> strictText $ dtTypeToHaskell dt
@@ -347,7 +350,7 @@ tensorArg p = case parsedArgCase p of
 
 attrComment :: Attr a -> Doc
 attrComment a = argComment' (attrName a) (attrDescription a)
-        
+
 argComment :: ParsedArg -> Doc
 argComment a = argComment' (parsedArgName a) (parsedArgDescription a)
 
@@ -361,7 +364,7 @@ bold n = "__" <> n <> "__"
 -- | Comment for the outputs of an op.
 -- For example:
 --   -- ^ (__output1__, __output2__)
---   -- 
+--   --
 --   -- * __output1__: description1
 --   --
 --   -- * __output2__: description2

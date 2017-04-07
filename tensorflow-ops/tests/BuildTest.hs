@@ -35,9 +35,7 @@ import TensorFlow.Build
     , asGraphDef
     , evalBuildT
     , flushNodeBuffer
-    , render
     , withDevice
-    , colocateWith
     , withNameScope
     , opName
     )
@@ -54,7 +52,13 @@ import TensorFlow.Ops
     , Variable(..)
     )
 import TensorFlow.Output (Device(..))
-import TensorFlow.Tensor (Tensor, Value, Ref)
+import TensorFlow.Tensor
+    ( colocateWith
+    , render
+    , Tensor
+    , Value
+    , Ref
+    )
 import TensorFlow.Session
     ( run
     , runSession
@@ -180,8 +184,8 @@ testRereadRef = testCase "testReRunAssign" $ runSession $ do
 testMultipleInitialized :: Test
 testMultipleInitialized = testCase "testMultipleInitialized"
                             $ runSession $ do
-    w <- initializedVariable (2 :: Tensor Value Int64)
-    v <- initializedVariable (3 :: Tensor Value Int64)
+    w <- initializedVariable (2 :: Tensor Build Int64)
+    v <- initializedVariable (3 :: Tensor Build Int64)
     (w', v') <- run (readVar w, readVar v)
     liftIO $ (2, 3) @=? (unScalar w', unScalar v')
 
