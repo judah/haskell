@@ -15,6 +15,7 @@ packages:
 - tensorflow-records
 - tensorflow-records-conduit
 - tensorflow-test
+- tensorflow-flow
 
 extra-deps:
 # proto-lens is not yet in Stackage.
