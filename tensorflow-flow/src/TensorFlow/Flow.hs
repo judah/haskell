@@ -6,7 +6,23 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UndecidableInstances #-}
-module TensorFlow.Flow where
+module TensorFlow.Flow
+    ( Session
+    , runSession
+    , Flow
+    , Now
+    , Expr
+    , runFlow
+    , deferFlow
+    , fetchFlow
+    , Deferred
+    , splice
+    , newVariable
+    , assign
+    , initializedVariable
+    , readValue
+    , liftF2
+    ) where
 
 import Data.Complex (Complex)
 import Data.Default (def)
@@ -81,11 +97,12 @@ newtype Deferred = Deferred Deps
 splice :: Deferred -> Flow s ()
 splice (Deferred deps) = Flow $ modify (<> deps)
 
-buildDeps :: Nodes a => Build a -> Flow s ()
+buildDeps :: Nodes a => Build a -> Flow s a
 buildDeps m = do
     prevDeps <- Flow get
     result <- Flow $ lift $ withNodeDependencies prevDeps m
     Flow $ lift (getNodes result) >>= put
+    return result
 
 instance (Num a,
          OneOf '[ Double, Float, Int32, Int64,
@@ -104,7 +121,7 @@ newVariable = Flow . lift . Variable.variable
 
 -- TODO: does this actually line up??
 assign :: forall a s . TensorType a => Variable a -> Expr s a -> Flow s ()
-assign v (Expr x) = buildDeps $ Variable.assign v x
+assign v (Expr x) = void $ buildDeps $ Variable.assign v x
 
 -- initializedVariable :: TensorType a => Expr (Now s) a -> Flow (Now s) (Variable a)
 initializedVariable x = do
@@ -112,12 +129,9 @@ initializedVariable x = do
     assign v x
     return v
 
+-- TODO: this sequences the read against everything else.  Is that too strict?
 readValue :: TensorType a => Variable a -> Flow s (Expr s a)
-readValue v = do
-    prevDeps <- Flow get
-    result <- Flow $ lift $ withNodeDependencies prevDeps
-                    $ render $ Variable.readValue v
-    return $ Expr $ expr result
+readValue = fmap (Expr . expr) . buildDeps . render . Variable.readValue
 
 liftF2 :: (a -> b -> c) -> Flow s a -> Flow s b -> Flow s c
 liftF2 f (Flow g) (Flow h) = Flow $ do
