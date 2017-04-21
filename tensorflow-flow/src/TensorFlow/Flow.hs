@@ -16,7 +16,7 @@ module TensorFlow.Flow
     , deferFlow
     , fetchFlow
     , Deferred
-    , splice
+    , runDeferred
     , newVariable
     , assign
     , initializedVariable
@@ -53,11 +53,22 @@ import qualified Proto.Tensorflow.Core.Framework.TensorShape
 
 class Now s where
 
-type Deps = Set.Set NodeName
+data Deps = Deps
+    { latestWrites :: Set.Set NodeName
+    , latestReads :: Set.Set NodeName
+    }
+
+writeDeps, readDeps :: Set.Set NodeName -> Deps
+writeDeps d = Deps d mempty
+readDeps d = Deps mempty d
+
+instance Monoid Deps where
+    Deps a b `mappend` Deps a' b' = Deps (a <> a') (b <> b')
+    mempty = Deps Set.empty Set.empty
 
 -- TODO: nicer
 instance Nodes Deps where
-    getNodes = return
+    getNodes = return . latestWrites
 
 instance Fetchable Deps () where
     getFetch _ = return $ pure ()
@@ -70,7 +81,7 @@ newtype Expr t a = Expr (Tensor Build a)
 
 runFlow :: forall a . (forall s . Now s => Flow s a) -> Session a
 runFlow (Flow act :: Flow NowInstance a) = do
-    (result, deps) <- build $ runStateT act Set.empty
+    (result, deps) <- build $ runStateT act mempty
     run_ deps
     return result
 
@@ -79,7 +90,7 @@ instance Now NowInstance
 
 deferFlow :: (forall s . Flow s ()) -> Session Deferred
 deferFlow (Flow act) = do
-    deps <- build $ execStateT act Set.empty
+    deps <- build $ execStateT act mempty
     return $ Deferred deps
 
 -- TODO: more generic
@@ -88,20 +99,31 @@ fetchFlow :: forall a b . Fetchable (Tensor Build a) b
           -> Session b
 fetchFlow (Flow act :: Flow NowInstance (Expr NowInstance a)) = do
     -- TODO: should we avoid running the deps?
-    (Expr t, deps) <- build (runStateT act Set.empty)
+    (Expr t, deps) <- build (runStateT act mempty)
     (result, ()) <- run (t, deps)
     return result
 
 newtype Deferred = Deferred Deps
+    deriving Monoid
 
-splice :: Deferred -> Flow s ()
-splice (Deferred deps) = Flow $ modify (<> deps)
+runDeferred :: Deferred -> Session ()
+runDeferred (Deferred deps) = run_ deps
 
-buildDeps :: Nodes a => Build a -> Flow s a
-buildDeps m = do
+buildWriteDeps :: Nodes a => Build a -> Flow s a
+buildWriteDeps m = do
     prevDeps <- Flow get
-    result <- Flow $ lift $ withNodeDependencies prevDeps m
-    Flow $ lift (getNodes result) >>= put
+    result <- Flow $ lift $ withNodeDependencies
+                    (latestWrites prevDeps <> latestReads prevDeps)
+                    m
+    Flow $ lift (getNodes result) >>= put . writeDeps
+    return result
+
+buildReadDeps :: Nodes a => Build a -> Flow s a
+buildReadDeps m = do
+    prevDeps <- Flow get
+    result <- Flow $ lift $ withNodeDependencies
+                    (latestWrites prevDeps) m
+    Flow $ lift (getNodes result) >>= put . (<> prevDeps) . readDeps
     return result
 
 instance (Num a,
@@ -121,7 +143,7 @@ newVariable = Flow . lift . Variable.variable
 
 -- TODO: does this actually line up??
 assign :: forall a s . TensorType a => Variable a -> Expr s a -> Flow s ()
-assign v (Expr x) = void $ buildDeps $ Variable.assign v x
+assign v (Expr x) = void $ buildWriteDeps $ Variable.assign v x
 
 -- initializedVariable :: TensorType a => Expr (Now s) a -> Flow (Now s) (Variable a)
 initializedVariable x = do
@@ -131,7 +153,7 @@ initializedVariable x = do
 
 -- TODO: this sequences the read against everything else.  Is that too strict?
 readValue :: TensorType a => Variable a -> Flow s (Expr s a)
-readValue = fmap (Expr . expr) . buildDeps . render . Variable.readValue
+readValue = fmap (Expr . expr) . buildReadDeps . render . Variable.readValue
 
 liftF2 :: (a -> b -> c) -> Flow s a -> Flow s b -> Flow s c
 liftF2 f (Flow g) (Flow h) = Flow $ do
