@@ -19,9 +19,11 @@ module TensorFlow.Flow
     , runDeferred
     , newVariable
     , assign
+    , assignAdd
     , initializedVariable
     , readValue
     , liftF2
+    , Scalar(..)
     ) where
 
 import Data.Complex (Complex)
@@ -139,11 +141,20 @@ instance (Num a,
     fromInteger = Expr . fromInteger
 
 newVariable :: forall a s . (Now s, TensorType a) => Shape -> Flow s (Variable a)
-newVariable = Flow . lift . Variable.variable
+newVariable = isolated . Variable.variable
 
--- TODO: does this actually line up??
+isolated :: Build a -> Flow s a
+isolated = Flow . lift
+
 assign :: forall a s . TensorType a => Variable a -> Expr s a -> Flow s ()
-assign v (Expr x) = void $ buildWriteDeps $ Variable.assign v x
+assign v (Expr x) = do
+    x' <- isolated $ render x
+    void $ buildWriteDeps $ Variable.assign v x'
+
+assignAdd :: forall a s . TensorType a => Variable a -> Expr s a -> Flow s ()
+assignAdd v (Expr x) = do
+    x' <- isolated $ render x
+    void $ buildWriteDeps $ Variable.assignAdd v x'
 
 -- initializedVariable :: TensorType a => Expr (Now s) a -> Flow (Now s) (Variable a)
 initializedVariable x = do
