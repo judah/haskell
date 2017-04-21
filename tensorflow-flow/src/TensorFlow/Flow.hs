@@ -1,9 +1,10 @@
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE EmptyDataDecls #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UndecidableInstances #-}
 module TensorFlow.Flow where
 
@@ -34,11 +35,16 @@ import Proto.Tensorflow.Core.Framework.Tensor
 import qualified Proto.Tensorflow.Core.Framework.TensorShape
   as TensorShape
 
+class Now s where
+
 type Deps = Set.Set NodeName
 
 -- TODO: nicer
 instance Nodes Deps where
     getNodes = return
+
+instance Fetchable Deps () where
+    getFetch _ = return $ pure ()
 
 -- TODO: the Deps are already in GraphState's initializationNodes
 newtype Flow s a = Flow (StateT Deps Build a)
@@ -46,28 +52,40 @@ newtype Flow s a = Flow (StateT Deps Build a)
 
 newtype Expr t a = Expr (Tensor Build a)
 
-runFlow :: (forall s . Flow (Once s) a) -> Session a
-runFlow (Flow act) = do
+runFlow :: forall a . (forall s . Now s => Flow s a) -> Session a
+runFlow (Flow act :: Flow NowInstance a) = do
     (result, deps) <- build $ runStateT act Set.empty
     run_ deps
     return result
+
+data NowInstance
+instance Now NowInstance
 
 deferFlow :: (forall s . Flow s ()) -> Session Deferred
 deferFlow (Flow act) = do
     deps <- build $ execStateT act Set.empty
     return $ Deferred deps
 
+-- TODO: more generic
+fetchFlow :: forall a b . Fetchable (Tensor Build a) b
+          => (forall s . Now s => Flow s (Expr s a))
+          -> Session b
+fetchFlow (Flow act :: Flow NowInstance (Expr NowInstance a)) = do
+    -- TODO: should we avoid running the deps?
+    (Expr t, deps) <- build (runStateT act Set.empty)
+    (result, ()) <- run (t, deps)
+    return result
+
 newtype Deferred = Deferred Deps
 
 splice :: Deferred -> Flow s ()
 splice (Deferred deps) = Flow $ modify (<> deps)
 
-withDeps :: Nodes a => Build a -> Flow s a
-withDeps m = do
+buildDeps :: Nodes a => Build a -> Flow s ()
+buildDeps m = do
     prevDeps <- Flow get
     result <- Flow $ lift $ withNodeDependencies prevDeps m
     Flow $ lift (getNodes result) >>= put
-    return result
 
 instance (Num a,
          OneOf '[ Double, Float, Int32, Int64,
@@ -81,22 +99,25 @@ instance (Num a,
     negate (Expr a) = Expr (negate a)
     fromInteger = Expr . fromInteger
 
-newVariable :: forall a s . TensorType a => Shape -> Flow (Once s) (Variable a)
+newVariable :: forall a s . (Now s, TensorType a) => Shape -> Flow s (Variable a)
 newVariable = Flow . lift . Variable.variable
 
+-- TODO: does this actually line up??
 assign :: forall a s . TensorType a => Variable a -> Expr s a -> Flow s ()
-assign v (Expr x) = void $ withDeps $ Variable.assign v x
+assign v (Expr x) = buildDeps $ Variable.assign v x
 
-data Once s
-
-initializedVariable :: TensorType a => Expr (Once s) a -> Flow (Once s) (Variable a)
+-- initializedVariable :: TensorType a => Expr (Now s) a -> Flow (Now s) (Variable a)
 initializedVariable x = do
     v <- newVariable (Shape [])  -- unknown shape at the start
     assign v x
     return v
 
-value :: TensorType a => Variable a -> Expr s a
-value = Expr . Variable.readValue
+readValue :: TensorType a => Variable a -> Flow s (Expr s a)
+readValue v = do
+    prevDeps <- Flow get
+    result <- Flow $ lift $ withNodeDependencies prevDeps
+                    $ render $ Variable.readValue v
+    return $ Expr $ expr result
 
 liftF2 :: (a -> b -> c) -> Flow s a -> Flow s b -> Flow s c
 liftF2 f (Flow g) (Flow h) = Flow $ do
