@@ -25,9 +25,9 @@ deferTest = testCase "deferTest" $ runSession $ do
             x' <- fetchFlow $ readValue v
             liftIO $ x @=? unScalar x'
     expect (3 :: Float)
-    runDeferred a
+    runFlow $ splice a
     expect 6
-    runDeferred a
+    runFlow $ splice a
     expect 12
 
 main :: IO ()

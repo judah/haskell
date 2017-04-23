@@ -16,7 +16,7 @@ module TensorFlow.Flow
     , deferFlow
     , fetchFlow
     , Deferred
-    , runDeferred
+    , splice
     , newVariable
     , assign
     , assignAdd
@@ -108,8 +108,8 @@ fetchFlow (Flow act :: Flow NowInstance (Expr NowInstance a)) = do
 newtype Deferred = Deferred Deps
     deriving Monoid
 
-runDeferred :: Deferred -> Session ()
-runDeferred (Deferred deps) = run_ deps
+splice :: Deferred -> Flow s ()
+splice (Deferred deps) = Flow $ modify (<> deps)
 
 buildWriteDeps :: Nodes a => Build a -> Flow s a
 buildWriteDeps m = do
