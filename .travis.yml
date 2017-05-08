@@ -1,0 +1,39 @@
+# Use a lightweight base image; we provide our own build tools.
+language: cpp
+
+# Docker builds make GHC much slower for some reason:
+# https://github.com/travis-ci/travis-ci/issues/5623
+sudo: required
+dist: trusty
+
+cache:
+  directories:
+  - $HOME/.stack
+
+addons:
+  apt:
+    packages:
+    - libgmp-dev
+    - libsnappy-dev
+    - libc6
+
+before_install:
+  - echo $PATH
+  - ls /usr/lib
+  - ls /usr/local/lib
+  - curl -L https://github.com/commercialhaskell/stack/releases/download/v1.4.0/stack-1.4.0-linux-x86_64.tar.gz | sudo tar xz --wildcards --strip-components=1 -C /usr/local/bin '*/stack'
+  - curl -L https://github.com/google/protobuf/releases/download/v3.3.0/protoc-3.3.0-linux-x86_64.zip > protoc-release.zip
+  - unzip -p protoc-release.zip bin/protoc > protoc
+  - chmod a+x protoc
+  - sudo mv protoc /usr/local/bin
+  - rm protoc-release.zip
+  - curl -O https://storage.googleapis.com/tensorflow/libtensorflow/libtensorflow-cpu-linux-x86_64-1.0.0.tar.gz
+  - sudo tar zxf libtensorflow-cpu-linux-x86_64-1.0.0.tar.gz -C /usr/local
+  - sudo ldconfig
+
+install:
+  - stack setup --no-terminal
+  - stack build --only-snapshot --no-terminal --test --no-run-tests
+
+script:
+  - stack test --haddock --no-haddock-deps --pedantic
