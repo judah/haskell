@@ -1,15 +1,25 @@
 name:                tensorflow
-version:             0.1.0.0
+version:             0.1.0.2
 synopsis:            TensorFlow bindings.
-description:         Please see README.md
+description:
+    This library provides an interface to the TensorFlow
+    bindings.  "TensorFlow.Core" contains the base API for
+    building and running computational graphs.  Other packages
+    such as @tensorflow-ops@ contain bindings to the actual
+    computational kernels.
+    .
+    For more documentation and examples, see
+    <https://github.com/tensorflow/haskell#readme>
 homepage:            https://github.com/tensorflow/haskell#readme
 license:             Apache
+license-file:        LICENSE
 author:              TensorFlow authors
 maintainer:          tensorflow-haskell@googlegroups.com
 copyright:           Google Inc.
 category:            Machine Learning
 build-type:          Simple
 cabal-version:       >=1.22
+extra-source-files: third_party/tensorflow/c/c_api.h
 
 library
   hs-source-dirs:   src
@@ -51,6 +61,12 @@ library
   extra-libraries:     tensorflow
   default-language:    Haskell2010
   include-dirs: .
+  if os(darwin) {
+    -- The default XCode installation doesn't search this path, so add it
+    -- manually.  Alternately, users can run `xcode-select --install` to add
+    -- it permanently to their search path.
+    extra-lib-dirs: /usr/local/lib
+  }
 
 Test-Suite FFITest
   default-language: Haskell2010
@@ -76,7 +92,6 @@ Test-Suite VarIntTest
   build-depends: base
                , attoparsec
                , bytestring
-               , google-shim
                , tensorflow
                , test-framework
                , test-framework-quickcheck2

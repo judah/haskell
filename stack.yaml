@@ -1,7 +1,6 @@
-resolver: lts-8.6
+resolver: lts-8.13
 
 packages:
-- google-shim
 - tensorflow
 - tensorflow-core-ops
 - tensorflow-logging
@@ -10,29 +9,18 @@ packages:
 - tensorflow-proto
 - tensorflow-mnist
 - tensorflow-mnist-input-data
-- tensorflow-queue
-- tensorflow-nn
 - tensorflow-records
 - tensorflow-records-conduit
 - tensorflow-test
 - tensorflow-flow
 
 extra-deps:
-# proto-lens is not yet in Stackage.
-- proto-lens-0.2.0.1
-- proto-lens-protoc-0.2.0.1
-- proto-lens-descriptors-0.2.0.1
 - snappy-framing-0.1.1
 - snappy-0.2.0.2
-- lens-labels-0.1.0.1
 
-# Allow our custom Setup.hs scripts to import Data.ProtoLens.Setup from the version of
-# `proto-lens-protoc` in stack's local DB.  See:
-# https://github.com/google/proto-lens/blob/master/README.md#using-cabal
-explicit-setup-deps:
-  "*": true
-
-# For Mac OS X, whose linker doesn't use this path by default:
+# For Mac OS X, whose linker doesn't use this path by default
+# unless you run `xcode-select --install`.
+# TODO: remove this once we stop depending on `snappy`.
 extra-lib-dirs:
     - /usr/local/lib
 extra-include-dirs:

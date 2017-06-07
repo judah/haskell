@@ -19,10 +19,9 @@ module Main where
 
 import Control.Monad.IO.Class (liftIO)
 import Data.Int (Int32, Int64)
-import Google.Test (googleTest)
+import Test.Framework (defaultMain, Test)
 import Lens.Family2 ((.~))
 import System.IO.Temp (withSystemTempDirectory)
-import Test.Framework (Test)
 import Test.Framework.Providers.HUnit (testCase)
 import Test.HUnit ((@=?))
 import qualified Data.ByteString.Char8 as B8
@@ -94,10 +93,23 @@ testScalarFeedCse = testCase "testScalarFeedCse" $ TF.runSession $ do
                 $ p1 `TF.add` p2
     liftIO $ result @=? TF.Scalar 5
 
+-- | See https://github.com/tensorflow/haskell/issues/92.
+-- Even though we're not explicitly evaluating `f0` until the end,
+-- it should hold the earlier value of the variable.
+testRereadRef :: Test
+testRereadRef = testCase "testReRunAssign" $ TF.runSession $ do
+    w <- TF.initializedVariable 0
+    f0 <- TF.run w
+    TF.run_ =<< TF.assign w (TF.scalar (0.1 :: Float))
+    f1 <- TF.run w
+    liftIO $ (0.0, 0.1) @=? (TF.unScalar f0, TF.unScalar f1)
+
 main :: IO ()
-main = googleTest [ testSaveRestore
-                  , testSize
-                  , testReducedShape
-                  , testPlaceholderCse
-                  , testScalarFeedCse
-                  ]
+main = defaultMain
+            [ testSaveRestore
+            , testSize
+            , testReducedShape
+            , testPlaceholderCse
+            , testScalarFeedCse
+            , testRereadRef
+            ]

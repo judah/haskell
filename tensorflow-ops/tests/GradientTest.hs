@@ -15,21 +15,26 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE FlexibleContexts #-}
 
-import Data.Int (Int32)
+import Data.Int (Int32, Int64)
 import Data.List (sort)
 import Data.ProtoLens.TextFormat (showMessage)
-import Google.Test (googleTest)
-import Lens.Family2 ((^..))
-import Test.Framework (Test)
+import Test.Framework (defaultMain, Test)
+import Lens.Family2 ((^..), (.~))
+
 import Test.Framework.Providers.HUnit (testCase)
-import Test.HUnit ((@=?))
+import Test.HUnit ((@=?), assertEqual)
 import qualified Data.Vector as V
+import Control.Monad.IO.Class (liftIO)
 
 import qualified TensorFlow.Core as TF
-import qualified TensorFlow.GenOps.Core as TF (max)
+import qualified TensorFlow.GenOps.Core as TF (max, tile)
 import qualified TensorFlow.Gradient as TF
-import qualified TensorFlow.Ops as TF
+import qualified TensorFlow.Ops as TF hiding (zeroInitializedVariable)
+import qualified TensorFlow.Output as TF
+import qualified TensorFlow.Types as TF
+import qualified TensorFlow.Variable as TF
 
 import Proto.Tensorflow.Core.Framework.Graph (node)
 import Proto.Tensorflow.Core.Framework.NodeDef (op)
@@ -160,11 +165,149 @@ testMaxGradient = testCase "testMaxGradient" $ do
     V.fromList [0, 0, 1, 0, 0 :: Float] @=? dx
 
 
+testReluGrad :: Test
+testReluGrad = testCase "testReluGrad" $ do
+    [dx] <- TF.runSession $ do
+        x <- TF.render $ TF.vector [2 :: Float]
+        let y = TF.relu x
+        TF.gradients y [x] >>= TF.run
+    V.fromList [1] @=? dx
+
+testReluGradGrad :: Test
+testReluGradGrad = testCase "testReluGradGrad" $ do
+    [dx] <- TF.runSession $ do
+        x <- TF.render $ TF.vector [2 :: Float]
+        let y = TF.relu x
+        [y'] <- TF.gradients y [x]
+        TF.gradients y' [x] >>= TF.run
+    V.fromList [0] @=? dx
+
+
+testFillGrad :: Test
+testFillGrad = testCase "testFillGrad" $ do
+    [dx] <- TF.runSession $ do
+        x <- TF.render $ TF.scalar (9 :: Float)
+        let shape = TF.vector [2, 3 :: Int32]
+        let y = TF.fill shape x
+        TF.gradients y [x] >>= TF.run
+    V.fromList [6] @=? dx
+
+
+testTileGrad :: Test
+testTileGrad = testCase "testTileGrad" $ do
+    [dx] <- TF.runSession $ do
+        x <- TF.render $ TF.vector [5, 9 :: Float]
+        let multiples = TF.vector [2 :: Int32]
+        let y = TF.tile x multiples
+        TF.gradients y [x] >>= TF.run
+    V.fromList [2, 2] @=? dx
+
+
+testTile2DGrad :: Test
+testTile2DGrad = testCase "testTileGrad2D" $ do
+    (dx, shapeDX, shapeX) <- TF.runSession $ do
+        let shape = TF.vector [3, 2 :: Int32]
+        x <- TF.render $ TF.fill shape (TF.scalar (1::Float))
+        let multiples = TF.vector [2, 3 :: Int32]
+        let y = TF.tile x multiples
+
+        [dx] <- TF.gradients y [x]
+        TF.run (dx, TF.shape dx, TF.shape x)
+    shapeX @=? (shapeDX :: V.Vector Int32)
+    V.fromList [6, 6, 6, 6, 6, 6::Float] @=? (dx :: V.Vector Float)
+
+
+matMulGradient :: Test
+matMulGradient = testCase "matMulGradients" $ do
+
+  let dfBuild = do
+        x <- TF.render $ TF.zeros $ TF.Shape [3, 1 :: Int64]
+        w <- TF.zeroInitializedVariable $ TF.Shape [1, 2 :: Int64]
+        let f = x `TF.matMul` TF.readValue w :: TF.Tensor TF.Build Float
+        dfs <- TF.gradients f [x]
+        return (x, dfs)
+
+  (xShape, dxShape) <- TF.runSession $ do
+    (x, [dx]) <- TF.build dfBuild
+    TF.run (TF.shape x, TF.shape dx)
+
+  assertEqual "Shape of gradient must match shape of input" xShape (dxShape :: V.Vector Int32)
+
+
+-- test that gradient of matMul can be taken gradient of
+matMulGradGrad :: Test
+matMulGradGrad = testCase "matMulGradGrad" $ do
+  let width = 2 :: Int64
+      batch = 4 :: Int64
+
+  let tower = do
+        x <- TF.render $ TF.zeros $ TF.Shape [batch, 1]
+        w <- TF.zeroInitializedVariable $ TF.Shape [1, width]
+        let f = x `TF.matMul` TF.readValue w
+        [dfdx] <- TF.gradients f [x]
+        let f'x = TF.reduceSum dfdx
+        [dfdw] <- TF.gradients f'x [w] -- take gradient again (this time over w)
+        return [TF.readValue w, TF.expr dfdw]
+
+  TF.runSession $ do
+    [w, dfdw] <- TF.build tower
+    (wShape, dfdwShape) <- TF.run (TF.shape w, TF.shape dfdw)
+    liftIO $ assertEqual "Shape of gradient must match input" wShape (dfdwShape :: V.Vector Int32)
+
+    let step = w `TF.add` dfdw
+    w0 <- TF.run step
+    liftIO $ V.fromList [4, 4 :: Float] @=? w0
+
+
+-- test that gradient of matMul deals correctly with transpose_a and transpose_b
+matMulTransposeGradient :: (Bool, Bool) -> Test
+matMulTransposeGradient txw = testCase ("matMulTransposeGradients " ++ show txw) $ do
+  let (transposeX, transposeW) = txw
+
+  let dfBuild = do
+        let xShape = TF.Shape [3, 1 :: Int64]
+        let xZeros = TF.zeros xShape
+        x <- TF.render $ if transposeX then TF.matTranspose xZeros else xZeros
+        variable <- TF.zeroInitializedVariable $ TF.Shape [1, 2 :: Int64]
+        let wv = if transposeW then TF.matTranspose (TF.readValue variable) else TF.readValue variable
+        let f = TF.matMul' (transAttrs transposeX transposeW) x wv :: TF.Tensor TF.Build Float
+        w <- TF.render wv
+        ds <- TF.gradients f [x, w]
+        return (x, w, ds)
+
+  TF.runSession $ do
+    (x, w, [dx, dw]) <- TF.build dfBuild
+    xShape <- TF.run $ TF.shape x
+    dxShape <- TF.run $ TF.shape dx
+    liftIO $ assertEqual "xShape must match dxShape" xShape (dxShape :: V.Vector Int32)
+
+    wShape <- TF.run $ TF.shape w
+    dwShape <- TF.run $ TF.shape dw
+    liftIO $ assertEqual "wShape must match dwShape" wShape (dwShape :: V.Vector Int32)
+
+transAttrs :: (TF.Attribute a,
+               TF.Attribute b) =>
+              a -> b -> TF.OpDef -> TF.OpDef
+transAttrs a b =
+  (TF.opAttr "transpose_a" .~ a) . (TF.opAttr "transpose_b" .~ b)
+
 main :: IO ()
-main = googleTest [ testGradientSimple
-                  , testGradientDisconnected
-                  , testCreateGraphStateful
-                  , testCreateGraphNameScopes
-                  , testDiamond
-                  , testMaxGradient
-                  ]
+main = defaultMain
+            [ testGradientSimple
+            , testGradientDisconnected
+            , testCreateGraphStateful
+            , testCreateGraphNameScopes
+            , testDiamond
+            , testMaxGradient
+            , testReluGrad
+            , testReluGradGrad
+            , testFillGrad
+            , testTileGrad
+            , testTile2DGrad
+            , matMulGradient
+            , matMulGradGrad
+            , matMulTransposeGradient (False, False)
+            , matMulTransposeGradient (False, True)
+            , matMulTransposeGradient (True, False)
+            , matMulTransposeGradient (True, True)
+            ]
