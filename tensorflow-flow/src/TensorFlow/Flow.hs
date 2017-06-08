@@ -7,23 +7,30 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UndecidableInstances #-}
 module TensorFlow.Flow
-    ( Session
+    ( -- * Session
+      Session
     , runSession
+      -- * The Flow monad
     , Flow
-    , Now
-    , Expr
     , runFlow
-    , deferFlow
     , fetchFlow
+    , Initializer
+    , liftF2
+      -- ** Fetchable types
+    , Scalar(..)
+    -- * Deferred actions
+    , deferFlow
     , Deferred
     , splice
+    -- * Operations
+    , Expr
+    -- ** Variables
+    , Variable
     , newVariable
     , assign
     , assignAdd
     , initializedVariable
     , readValue
-    , liftF2
-    , Scalar(..)
     ) where
 
 import Data.Complex (Complex)
@@ -53,7 +60,7 @@ import Proto.Tensorflow.Core.Framework.Tensor
 import qualified Proto.Tensorflow.Core.Framework.TensorShape
   as TensorShape
 
-class Now s where
+class Initializer s where
 
 data Deps = Deps
     { latestWrites :: Set.Set NodeName
@@ -62,7 +69,7 @@ data Deps = Deps
 
 writeDeps, readDeps :: Set.Set NodeName -> Deps
 writeDeps d = Deps d mempty
-readDeps d = Deps mempty d
+readDeps = Deps mempty
 
 instance Monoid Deps where
     Deps a b `mappend` Deps a' b' = Deps (a <> a') (b <> b')
@@ -79,16 +86,16 @@ instance Fetchable Deps () where
 newtype Flow s a = Flow (StateT Deps Build a)
     deriving (Functor, Applicative, Monad)
 
-newtype Expr t a = Expr (Tensor Build a)
+newtype Expr s a = Expr (Tensor Build a)
 
-runFlow :: forall a . (forall s . Now s => Flow s a) -> Session a
-runFlow (Flow act :: Flow NowInstance a) = do
+runFlow :: forall a . (forall s . Initializer s => Flow s a) -> Session a
+runFlow (Flow act :: Flow InitializerInstance a) = do
     (result, deps) <- build $ runStateT act mempty
     run_ deps
     return result
 
-data NowInstance
-instance Now NowInstance
+data InitializerInstance
+instance Initializer InitializerInstance
 
 deferFlow :: (forall s . Flow s ()) -> Session Deferred
 deferFlow (Flow act) = do
@@ -97,9 +104,9 @@ deferFlow (Flow act) = do
 
 -- TODO: more generic
 fetchFlow :: forall a b . Fetchable (Tensor Build a) b
-          => (forall s . Now s => Flow s (Expr s a))
+          => (forall s . Initializer s => Flow s (Expr s a))
           -> Session b
-fetchFlow (Flow act :: Flow NowInstance (Expr NowInstance a)) = do
+fetchFlow (Flow act :: Flow InitializerInstance (Expr InitializerInstance a)) = do
     -- TODO: should we avoid running the deps?
     (Expr t, deps) <- build (runStateT act mempty)
     (result, ()) <- run (t, deps)
@@ -131,7 +138,7 @@ buildReadDeps m = do
 instance (Num a,
          OneOf '[ Double, Float, Int32, Int64,
                   Complex Float, Complex Double] a)
-            => Num (Expr t a) where
+            => Num (Expr s a) where
     Expr a + Expr b = Expr (a + b)
     Expr a * Expr b = Expr (a * b)
     Expr a - Expr b = Expr (a - b)
@@ -140,7 +147,7 @@ instance (Num a,
     negate (Expr a) = Expr (negate a)
     fromInteger = Expr . fromInteger
 
-newVariable :: forall a s . (Now s, TensorType a) => Shape -> Flow s (Variable a)
+newVariable :: forall a s . (Initializer s, TensorType a) => Shape -> Flow s (Variable a)
 newVariable = isolated . Variable.variable
 
 isolated :: Build a -> Flow s a
@@ -156,7 +163,7 @@ assignAdd v (Expr x) = do
     x' <- isolated $ render x
     void $ buildWriteDeps $ Variable.assignAdd v x'
 
--- initializedVariable :: TensorType a => Expr (Now s) a -> Flow (Now s) (Variable a)
+initializedVariable :: (TensorType a, Initializer s) => Expr s a -> Flow s (Variable a)
 initializedVariable x = do
     v <- newVariable (Shape [])  -- unknown shape at the start
     assign v x
